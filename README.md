@@ -7,7 +7,7 @@
 
 ## Current status
 
-Steps 1 through 3 are implemented: the repository contains the Streamlit application scaffold, validated environment configuration, Docker Compose local stack, database/app readiness checks, an AST-based PostgreSQL DDL parser, and deterministic constraint-safe synthetic data generation. The UI intentionally shows placeholders until the later workflow steps are completed.
+Steps 1 through 4 are implemented: the repository contains the Streamlit application scaffold, validated environment configuration, Docker Compose local stack, database/app readiness checks, an AST-based PostgreSQL DDL parser, deterministic constraint-safe synthetic data generation, and transactional PostgreSQL dataset persistence with exports. The UI intentionally shows placeholders until the later workflow steps are completed.
 
 ## Local development
 
@@ -27,6 +27,9 @@ The app configuration fails safely when required settings are missing or malform
 - Foreign keys must point to a primary or unique key in the same upload and have compatible normalized types. Cycles are accepted only when every participating reference is nullable or `DEFERRABLE`; the accepted strategy is preserved in the schema metadata.
 - Generation uses a seeded local random generator and validates every record before persistence. It supports 1,000 rows per table by default and validated per-table overrides from 1 to 10,000 rows. Gemini may propose a JSON generation profile through Vertex AI, but invalid/unavailable responses fall back to a local profile; Gemini never generates the individual records.
 - The generation report records requested/generated counts, seed, fallback status, warnings, validation result, model identifier, and sanitized prompt metadata (instruction length and table count only).
+- `app.persistence.DatasetStore` stores each validated dataset version in its own generated PostgreSQL schema, while keeping dataset/schema/version/request/validation/export metadata in application-owned tables. It never executes the uploaded DDL: it renders quoted identifiers and normalized supported types from the validated schema model.
+- Persistence is transactional: local validation occurs first, PostgreSQL verifies materialized constraints before activation, and a failed attempt cannot replace an active version. Failed attempts retain diagnostic metadata without retained generated tables.
+- CSV exports are UTF-8 and ZIP exports contain every version table plus `manifest.json`; both are scoped to a selected dataset/version (or that dataset's active version) and are audit logged.
 - The bundled sample files currently contain MySQL-only syntax such as `AUTO_INCREMENT`, `ENUM`, and `DATETIME`; they are intentionally rejected until replaced with PostgreSQL equivalents.
 
 See [the implementation plan](reqs/PLAN.md) for the supported PostgreSQL DDL subset and the full verification criteria.

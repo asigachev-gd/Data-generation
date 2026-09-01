@@ -47,6 +47,12 @@ By the end of the practice, you need to develop a user-friendly UI and present b
 - A Gemini structured JSON profile is validated against every submitted table and column. Model failures, incomplete profiles, and invalid values safely use a local type/name-based profile instead; Gemini does not generate individual dataset rows.
 - The pre-persistence validator enforces scalar type bounds, nullability, primary and unique keys, supported evaluable checks, and single/composite foreign-key membership. A generation report records counts, seed, validation result, fallback/warnings, model identifier, and sanitized metadata.
 
+## Implemented PostgreSQL persistence and exports (Step 4)
+
+- Validated datasets are loaded transactionally into isolated generated PostgreSQL schemas. The application renders its own quoted table definitions from the canonical model and never executes uploaded DDL.
+- Dataset, schema, immutable version, table-version, request/validation, and export-audit metadata is stored in application-owned PostgreSQL tables. A version becomes active only after database-side constraint validation succeeds; failed materialization keeps diagnostics without replacing an active version.
+- Retrieval is scoped to a dataset and version, defaulting to that dataset's active version. Table CSV exports are UTF-8, and ZIP exports include every table CSV plus a dataset/version/schema manifest.
+
 ## Functional Requirements
 
 ### Phase 1: Synthetic Data Generation

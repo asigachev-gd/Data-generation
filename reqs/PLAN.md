@@ -17,7 +17,7 @@ The implementation must make these boundaries explicit:
 - [x] Step 1: Project scaffold, configuration, and local stack
 - [x] Step 2: DDL parsing, validation, and schema model
 - [x] Step 3: Structured generation planning and deterministic data generation
-- [ ] Step 4: PostgreSQL persistence, versioning, and export
+- [x] Step 4: PostgreSQL persistence, versioning, and export
 - [ ] Step 5: Data Generation UI
 - [ ] Step 6: Bounded table-edit and regeneration workflow
 - [ ] Step 7: Talk-to-your-data UI and safe query layer
@@ -136,6 +136,13 @@ Persist valid dataset versions in PostgreSQL, retain their metadata, and provide
 - PostgreSQL integration tests cover rollback, persistence, version activation, metadata retrieval, and constraint enforcement.
 - Export tests verify CSV escaping, ZIP validity, expected table files, and manifest contents.
 - Tests confirm a failed generation or edit cannot replace the active dataset version.
+
+### Delivered
+
+- `app.persistence.DatasetStore` creates application metadata for datasets, schema models, immutable versions, table versions, generation requests, validation outcomes, and export audits.
+- Each validated version is materialized in an isolated generated PostgreSQL schema using quoted identifiers and normalized types from the canonical model; uploaded DDL is retained only as metadata and never executed.
+- Local validation, row loading, and PostgreSQL constraint validation are transactional. Only a successful version becomes active; failed attempts retain diagnostic metadata without materialized tables.
+- Dataset/version-scoped retrieval defaults to the selected dataset's active version. UTF-8 CSV and ZIP exports provide table data and a JSON dataset/version/schema manifest.
 
 ---
 
