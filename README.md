@@ -7,7 +7,7 @@
 
 ## Current status
 
-Steps 1 and 2 are implemented: the repository contains the Streamlit application scaffold, validated environment configuration, Docker Compose local stack, database/app readiness checks, and an AST-based PostgreSQL DDL parser with a validated canonical schema model. The UI intentionally shows placeholders until the later workflow steps are completed.
+Steps 1 through 3 are implemented: the repository contains the Streamlit application scaffold, validated environment configuration, Docker Compose local stack, database/app readiness checks, an AST-based PostgreSQL DDL parser, and deterministic constraint-safe synthetic data generation. The UI intentionally shows placeholders until the later workflow steps are completed.
 
 ## Local development
 
@@ -25,6 +25,8 @@ The app configuration fails safely when required settings are missing or malform
 - Talk-to-your-data executes only validated read-only queries against the user-selected dataset version.
 - Uploaded DDL is parsed but never executed. The supported PostgreSQL subset is scalar columns; `NOT NULL`, `DEFAULT`, `CHECK`, `UNIQUE`, primary keys, and foreign keys (including composite keys and supplied actions/deferrability). Unsupported SQL and ambiguous schemas fail with source-aware errors.
 - Foreign keys must point to a primary or unique key in the same upload and have compatible normalized types. Cycles are accepted only when every participating reference is nullable or `DEFERRABLE`; the accepted strategy is preserved in the schema metadata.
+- Generation uses a seeded local random generator and validates every record before persistence. It supports 1,000 rows per table by default and validated per-table overrides from 1 to 10,000 rows. Gemini may propose a JSON generation profile through Vertex AI, but invalid/unavailable responses fall back to a local profile; Gemini never generates the individual records.
+- The generation report records requested/generated counts, seed, fallback status, warnings, validation result, model identifier, and sanitized prompt metadata (instruction length and table count only).
 - The bundled sample files currently contain MySQL-only syntax such as `AUTO_INCREMENT`, `ENUM`, and `DATETIME`; they are intentionally rejected until replaced with PostgreSQL equivalents.
 
 See [the implementation plan](reqs/PLAN.md) for the supported PostgreSQL DDL subset and the full verification criteria.

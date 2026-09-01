@@ -41,6 +41,12 @@ By the end of the practice, you need to develop a user-friendly UI and present b
 - The parser preserves normalized schema metadata and source positions, rejects unsupported or ambiguous SQL with actionable errors, validates foreign-key targets/type compatibility, and classifies allowable nullable/deferred cycles.
 - The repository's current sample DDL files use MySQL-only constructs (`AUTO_INCREMENT`, `ENUM`, and `DATETIME`) and are intentionally rejected until PostgreSQL equivalents are supplied.
 
+## Implemented generation engine (Step 3)
+
+- Synthetic rows are generated locally in a reproducible seeded run, with 1,000 rows per table by default and validated per-table overrides from 1 through 10,000.
+- A Gemini structured JSON profile is validated against every submitted table and column. Model failures, incomplete profiles, and invalid values safely use a local type/name-based profile instead; Gemini does not generate individual dataset rows.
+- The pre-persistence validator enforces scalar type bounds, nullability, primary and unique keys, supported evaluable checks, and single/composite foreign-key membership. A generation report records counts, seed, validation result, fallback/warnings, model identifier, and sanitized metadata.
+
 ## Functional Requirements
 
 ### Phase 1: Synthetic Data Generation

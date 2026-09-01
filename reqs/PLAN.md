@@ -16,7 +16,7 @@ The implementation must make these boundaries explicit:
 
 - [x] Step 1: Project scaffold, configuration, and local stack
 - [x] Step 2: DDL parsing, validation, and schema model
-- [ ] Step 3: Structured generation planning and deterministic data generation
+- [x] Step 3: Structured generation planning and deterministic data generation
 - [ ] Step 4: PostgreSQL persistence, versioning, and export
 - [ ] Step 5: Data Generation UI
 - [ ] Step 6: Bounded table-edit and regeneration workflow
@@ -108,6 +108,12 @@ Generate realistic, valid rows for every table while enforcing the schema model 
 - Unit tests cover type generators, deterministic seeds, null/default handling, uniqueness collisions, check constraints, and invalid/partial structured model output.
 - Integration tests cover parent/child and composite FK integrity, all supplied sample schemas, and a maximum-scope seven-table schema.
 - Tests assert that all generated records pass the same validation routine used before persistence.
+
+### Delivered
+
+- `app.generation` defines a strict Gemini JSON generation-profile schema and validates complete table/column coverage before use. Unavailable or invalid model output falls back to local type/name-based profiles; only sanitized request metadata is retained.
+- Rows are generated locally with an optional seed, explicit validated per-table row counts (default 1,000; range 1–10,000), bounded retries, scalar type bounds, nullability, primary/unique keys, supported evaluable checks, and single/composite foreign keys.
+- All generated datasets pass `validate_dataset` before they can reach the persistence layer. The returned report includes counts, seed, fallback status, warnings, validation results, and model metadata.
 
 ---
 
