@@ -1,340 +1,235 @@
 # Implementation Plan
 
-This plan breaks the application into sequential milestones. Each step defines a concrete outcome and includes a verification phase with tests that must pass before moving on to the next phase.
+## Scope and decisions
 
-## General working principles
+This plan implements `reqs/REQUIREMENTS.md` for PostgreSQL DDL schemas of up to seven related tables. The application is a Python/Streamlit service, with PostgreSQL as the persistent store and Gemini 2.0 Flash or a newer Gemini model accessed through the Google GenAI SDK using Vertex AI authentication.
 
-- The project will use a Python-based application with a Streamlit UI.
-- PostgreSQL will be the system of record for generated datasets and query execution.
-- Gemini 2.0 Flash or newer will be used for schema interpretation, synthetic data generation, and natural language SQL generation.
-- Langfuse will be enabled for tracing and observability.
-- Every step ends with a verification gate: a focused automated test suite proving the implemented behavior.
-- Only the final step will run full end-to-end tests.
+The implementation must make these boundaries explicit:
 
----
+- The first release supports a documented PostgreSQL `CREATE TABLE` subset: scalar columns, `NOT NULL`, `DEFAULT`, `CHECK`, `UNIQUE`, single- and composite-column primary keys, and single- and composite-column foreign keys. Unsupported executable SQL, views, triggers, procedures, domains, partitioning, and ambiguous DDL are rejected with actionable errors rather than partially interpreted.
+- Cyclic foreign-key graphs are supported only when their constraints are nullable or deferrable; otherwise generation is rejected with an explanation. The accepted strategy is recorded with the dataset metadata.
+- Gemini produces structured generation profiles, edit plans, SQL/query presentation plans, and streamed user-facing explanations where useful. Deterministic local code generates and validates individual rows; the model must not be relied on to emit thousands of unconstrained database rows.
+- A generated dataset is immutable by version. An edit creates a new version atomically; the UI shows the active version. This preserves an audit trail and prevents a failed edit from corrupting a queryable dataset.
+- Talk-to-your-data permits a single read-only `SELECT` or `WITH ... SELECT` statement for the selected dataset only. The database role, SQL parser/validator, statement timeout, row limit, and transaction are all read-only; prompt text is never treated as authority to bypass those controls.
 
-## Step 1: Project scaffold and environment setup
+## Step checklist
 
-### Objective
-Set up the codebase structure, dependencies, container environment, and configuration needed to run the app locally and in Docker.
+- [ ] Step 1: Project scaffold, configuration, and local stack
+- [ ] Step 2: DDL parsing, validation, and schema model
+- [ ] Step 3: Structured generation planning and deterministic data generation
+- [ ] Step 4: PostgreSQL persistence, versioning, and export
+- [ ] Step 5: Data Generation UI
+- [ ] Step 6: Bounded table-edit and regeneration workflow
+- [ ] Step 7: Talk-to-your-data UI and safe query layer
+- [ ] Step 8: Observability, deployment, and operational safeguards
+- [ ] Step 9: Full end-to-end verification
 
-### Outcome
-The repository contains a working project skeleton with:
-- Python application entry points
-- dependency management files
-- Docker configuration for PostgreSQL and app services
-- environment variables for Gemini, PostgreSQL, and Langfuse
-- test folders and CI-ready structure
-
-### Implementation tasks
-- Create the application folder structure: app/, db/, services/, ui/, tests/
-- Initialize dependency files: requirements.txt or pyproject.toml
-- Configure Docker Compose with PostgreSQL and app containers
-- Add `.env.example` with required variables
-- Add health-check scripts and simple startup commands
-
-### Verification
-- Unit test: project scaffold loads without missing required config files.
-- Unit test: Docker Compose file contains PostgreSQL and app services.
-- Unit test: required environment variables are declared.
-
-### Test examples
-- `tests/test_scaffold.py`
-  - asserts that `docker-compose.yml` exists
-  - asserts that required directories exist
-  - asserts that environment template file contains keys for `POSTGRES_*`, `GEMINI_*`, and `LANGFUSE_*`
+Each step has a focused verification gate. Component, unit, and integration tests may run in earlier steps; browser-level end-to-end tests are reserved for Step 9.
 
 ---
 
-## Step 2: DDL parsing and schema model
+## Step 1: Project scaffold, configuration, and local stack
 
 ### Objective
-Build a parser that reads SQL/DDL files and extracts all structural information needed for synthetic data generation and SQL querying.
 
-### Outcome
-The parser successfully converts each DDL file into an internal schema model containing:
-- table names
-- column names
-- data types
-- nullability
-- primary keys
-- foreign keys
-- unique constraints
-- table relationships
+Create a reproducible Python/Streamlit project and Docker Compose development stack for the application and PostgreSQL.
 
 ### Implementation tasks
-- Parse `CREATE TABLE` statements from `.sql`, `.ddl`, and `.txt` inputs
-- Map raw SQL types to normalized data types
-- Detect column constraints such as `NOT NULL`, `UNIQUE`, `DEFAULT`, `CHECK`
-- Build a schema graph for foreign key relationships
-- Validate that uploaded files produce a complete and usable schema
+
+- Create application, service, database, UI, and test packages, with a single Streamlit entry point.
+- Choose and lock supported Python, PostgreSQL, and dependency versions in `pyproject.toml` or `requirements.txt`.
+- Configure Docker Compose for the app and PostgreSQL with persistent local database storage, health checks, and non-root application execution where practical.
+- Provide `.env.example` only with variable names and safe placeholders. Required configuration includes `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`, Vertex AI enablement, PostgreSQL connection settings, Gemini model name, and optional Langfuse credentials. Use Application Default Credentials; do not put service-account keys in the repository or image.
+- Implement typed configuration validation at startup and a health endpoint/status check that distinguishes app readiness from database readiness.
+- Add CI commands for formatting, linting, type checking if adopted, unit tests, and integration tests.
 
 ### Verification
-- Unit tests for parsing valid DDL files
-- Unit tests for rejecting malformed schema files
-- Integration test for schema graph construction
 
-### Test examples
-- `tests/test_ddl_parser.py`
-  - asserts that table names are extracted correctly
-  - asserts that primary and foreign keys are identified
-  - asserts that nullable columns are marked correctly
-  - asserts that a malformed DDL file raises a validation error
+- Configuration tests cover missing and malformed required settings without exposing secret values.
+- Docker Compose validation and a smoke start confirm both services become healthy.
+- A database integration fixture starts PostgreSQL without requiring a developer's existing database.
 
 ---
 
-## Step 3: Data generation engine and referential integrity
+## Step 2: DDL parsing, validation, and schema model
 
 ### Objective
-Create the core synthetic data generation engine that generates realistic rows respecting the DDL schema and relational constraints.
 
-### Outcome
-The system can generate valid synthetic data for tables with correct:
-- column typing
-- null handling
-- date/time formatting
-- numeric ranges
-- FK constraints
-- row-count configuration
+Convert an uploaded `.sql`, `.ddl`, or `.txt` file containing supported PostgreSQL DDL into an unambiguous internal schema model.
 
 ### Implementation tasks
-- Create a generator service that iterates through schema tables in dependency order
-- Generate parent tables before child tables
-- Use foreign key references to keep child rows consistent
-- Support a configurable number of rows per table
-- Respect null probability and domain-specific generation instructions
-- Support prompt-based generation guidance from the user
+
+- Use a PostgreSQL-aware parser rather than regular expressions; retain source locations for validation errors.
+- Parse quoted identifiers; scalar PostgreSQL types and their parameters; column and table-level `NOT NULL`, `DEFAULT`, `CHECK`, `UNIQUE`, primary-key, and foreign-key constraints; and foreign-key actions/deferrability where supplied.
+- Represent the schema in typed models, including composite constraints, normalized types, nullable state, and a dependency graph.
+- Validate duplicate identifiers, unknown FK targets, incompatible FK types, conflicting constraints, unsupported features, and cycles according to the scope rules above.
+- Do not execute uploaded DDL as part of parsing. Preserve the validated canonical model and safe original text only as dataset metadata.
 
 ### Verification
-- Unit tests for per-column generation logic
-- Integration tests for foreign key integrity across tables
-- Regression tests for null and date generation behavior
 
-### Test examples
-- `tests/test_data_generator.py`
-  - asserts that generated rows match declared column types
-  - asserts that no foreign key references missing parent rows exist
-  - asserts that row count matches requested target
-  - asserts that generated dates use expected formatting
+- Unit tests cover each supported constraint, quoted names, composite primary/foreign keys, defaults, checks, and validation errors.
+- Fixture tests include the supplied sample schemas when they are added to the repository and at least one five-to-seven-table schema.
+- Integration tests verify dependency ordering and supported-cycle classification.
 
 ---
 
-## Step 4: PostgreSQL persistence, export, and storage layer
+## Step 3: Structured generation planning and deterministic data generation
 
 ### Objective
-Store generated datasets in PostgreSQL and provide downloadable export mechanisms.
 
-### Outcome
-The application can:
-- create tables in PostgreSQL from the schema model
-- insert generated rows
-- persist generation metadata
-- provide CSV export per table
-- package datasets as ZIP archives
-- make data available for later query use in the talk-to-data interface
+Generate realistic, valid rows for every table while enforcing the schema model and user instructions.
 
 ### Implementation tasks
-- Create database connection and migration logic
-- Build schema creation from parsed DDL metadata
-- Insert generated records with transaction handling
-- Add export service for CSV and ZIP files
-- Add metadata table for dataset name, creation time, owner, and schema version
+
+- Define a JSON schema for Gemini's generation profile: per-column semantic category, generator parameters, allowed null behavior, and instruction rationale. Validate every model response and fall back to type-based local profiles when it is unavailable or invalid.
+- Request structured output through the Google GenAI SDK and record the model/version and sanitized prompt metadata. Use streaming only for progress/status text shown to the user; do not make persistence depend on an incomplete stream.
+- Generate values locally in dependency order with a seeded random generator for reproducible test runs. Make row counts explicit: a default of 1,000 rows per table and a validated per-table override range.
+- Enforce type bounds/precision, nullability, defaults, unique and primary-key constraints, evaluable checks, and foreign-key membership before persistence. Define a bounded retry budget and report unsatisfiable constraints instead of silently emitting invalid data.
+- For supported cycles, use nullable/deferred references and validate the completed graph. Reject unsupported cycles before generation.
+- Return a generation report containing requested/generated rows, fallback use, seed, warnings, and validation results.
 
 ### Verification
-- Integration tests against a temporary PostgreSQL database
-- Test for export file creation and archive validity
-- Test for dataset retrieval for later use
 
-### Test examples
-- `tests/test_db_storage.py`
-  - asserts that schema tables are created successfully
-  - asserts that generated rows are inserted without errors
-  - asserts that CSV export creates a valid file
-  - asserts that ZIP archive contains data files for each table
+- Unit tests cover type generators, deterministic seeds, null/default handling, uniqueness collisions, check constraints, and invalid/partial structured model output.
+- Integration tests cover parent/child and composite FK integrity, all supplied sample schemas, and a maximum-scope seven-table schema.
+- Tests assert that all generated records pass the same validation routine used before persistence.
 
 ---
 
-## Step 5: Data Generation UI and user interaction flow
+## Step 4: PostgreSQL persistence, versioning, and export
 
 ### Objective
-Implement the main Data Generation tab in the UI so a user can upload a schema, add instructions, set generation parameters, trigger generation, and preview results.
 
-### Outcome
-The Data Generation page supports:
-- schema upload from `.sql`, `.ddl`, or `.txt`
-- prompt text input
-- generation parameter controls such as temperature and row count
-- generate button action
-- preview for each generated table
-- per-table edit prompt and submit flow
+Persist valid dataset versions in PostgreSQL, retain their metadata, and provide safe CSV and ZIP downloads.
 
 ### Implementation tasks
-- Build sidebar navigation with Data Generation and Talk to your data tabs
-- Create upload widget and validation messages
-- Connect UI inputs to generation service
-- Render preview tables in the UI
-- Add per-table edit controls that send a modification prompt
-- Display success/error states after generation and change requests
+
+- Create application metadata tables for dataset, schema, dataset version, table version, generation/edit request, validation report, and export audit data. Treat user identity/owner as optional until authentication is in scope; do not claim multi-user isolation before it exists.
+- Materialize each validated dataset version in an isolated, generated schema or equivalent namespaced table mapping with quoted identifiers. Never apply untrusted uploaded DDL directly.
+- Insert data transactionally, run database-side constraint validation, and mark a version active only after success. Roll back and retain diagnostic metadata on failure.
+- Export selected active-version tables as UTF-8 CSV using safe response streaming; provide a ZIP containing one CSV per table and a manifest with dataset/version/schema information.
+- Provide retrieval APIs that always require a dataset and version selection; default to the active version.
 
 ### Verification
-- UI component tests for the generation tab
-- E2E-style flow tests for upload, generation, and preview rendering
-- Validation tests for form inputs
 
-### Test examples
-- `tests/test_generation_ui.py`
-  - asserts that schema upload accepts a valid file
-  - asserts that invalid file types are rejected
-  - asserts that Generate button triggers data creation
-  - asserts that table preview appears after generation
+- PostgreSQL integration tests cover rollback, persistence, version activation, metadata retrieval, and constraint enforcement.
+- Export tests verify CSV escaping, ZIP validity, expected table files, and manifest contents.
+- Tests confirm a failed generation or edit cannot replace the active dataset version.
 
 ---
 
-## Step 6: Table editing and regeneration workflow
+## Step 5: Data Generation UI
 
 ### Objective
-Allow users to modify generated tables through natural-language instructions and re-render the dataset accordingly.
 
-### Outcome
-The user can issue prompt-based adjustments for a specific table, and the system updates the table while preserving schema integrity and relational consistency.
+Implement the required Streamlit Data Generation workflow.
 
 ### Implementation tasks
-- Build an edit endpoint or function that accepts table name and textual instruction
-- Apply modification logic to rows or value distributions in a controlled way
-- Recheck generated data for FK consistency after edits
-- Refresh the preview UI with the updated table
-- Record generation history for each edit action
+
+- Add sidebar navigation for exactly the required primary views: **Data Generation** and **Talk to your data**.
+- In Data Generation, accept `.sql`, `.ddl`, and `.txt` uploads; show parser errors with source context; offer an instruction field, temperature with a documented allowed range, optional seed, and row-count controls.
+- Generate only after the user selects **Generate**. Stream progress/status text, then present the validation report, active dataset/version, paginated preview of every table, and CSV/ZIP download controls.
+- Keep uploaded source and generated values out of browser/session state beyond what the UI needs; reload previews from persisted active versions.
+- Include accessible error, empty, loading, and success states.
 
 ### Verification
-- Unit tests for prompt-to-change translation logic
-- Integration tests for table-specific updates
-- Regression test ensuring FK validity after edits
 
-### Test examples
-- `tests/test_table_editing.py`
-  - asserts that a table-specific prompt updates the intended table
-  - asserts that row count remains valid after edits
-  - asserts that foreign key relations remain valid
-  - asserts that the UI preview refreshes with updated data
+- Component tests cover accepted/rejected uploads, required-field validation, controls, error rendering, and persisted preview selection.
+- Service/UI integration tests cover upload through successful generation without a browser automation framework.
 
 ---
 
-## Step 7: Talk-to-your-data query layer
+## Step 6: Bounded table-edit and regeneration workflow
 
 ### Objective
-Implement the conversational SQL querying engine that accepts natural language questions and turns them into database queries and visual output.
 
-### Outcome
-The app can:
-- accept a natural-language user question
-- map it to a valid SQL query using the schema context
-- execute the query against PostgreSQL
-- return text, tables, or chart-based results
-- provide explanations for the query logic when required
+Allow useful natural-language changes without permitting unconstrained mutation of a relational dataset.
 
 ### Implementation tasks
-- Build a schema-aware SQL generation prompt using Gemini
-- Validate generated SQL before execution
-- Add safe execution environment and query restrictions
-- Convert result sets into UI-friendly structures
-- Support chart-ready output for aggregate data
-- Add error handling for invalid or unsafe SQL generation
+
+- Define a JSON edit-plan schema: target table/columns, permitted operation (regenerate matching columns, change a supported generator parameter, or change a bounded value distribution), scope/filter, expected row-count effect, and explanation. Gemini returns this schema through function calling or structured output; the backend validates it against the active schema.
+- The UI requires an active dataset/version and an explicit target table. It displays the validated proposed edit and asks for confirmation before execution.
+- Apply an edit in a transaction to a new dataset version. Propagate only necessary dependent-table repairs, reject requests whose safe impact cannot be determined, and re-run full schema and database validation before activation.
+- Record the original prompt, validated plan, model metadata, validation result, timestamps, and version lineage with sensitive content redacted in telemetry.
 
 ### Verification
-- Unit tests for SQL generation from natural language prompts
-- Unit tests for SQL validation and blocking unsafe queries
-- Integration tests for query execution and formatting of results
 
-### Test examples
-- `tests/test_nl_to_sql.py`
-  - asserts that natural language prompts generate valid SQL
-  - asserts that invalid or unsafe SQL is rejected
-  - asserts that result rows are returned in expected format
-  - asserts that chart data is created for aggregate visualizations
+- Unit tests cover invalid plans, disallowed target tables/columns, and model output that does not conform to the JSON schema.
+- Integration tests cover successful scoped edits, FK-preserving dependent repairs, rejected unsafe edits, version lineage, and rollback.
 
 ---
 
-## Step 8: Observability, deployment, and production readiness
+## Step 7: Talk-to-your-data UI and safe query layer
 
 ### Objective
-Ensure the system is observable, portable, and safe to run in a standard development environment.
 
-### Outcome
-The app includes:
-- Langfuse tracing for generation and query flows
-- Dockerized deployment configuration
-- application health checks
-- logs and error tracking
-- stable startup and teardown for local usage
+Let users query a selected generated dataset in natural language and receive a text answer, result table, or plot safely.
 
 ### Implementation tasks
-- Add Langfuse client configuration and trace decorators
-- Add startup health checks and logging across critical services
-- Ensure Docker containers are configured for the app and Postgres
-- Add environment validation on boot
-- Document run instructions and expected outputs
+
+- Add the Talk to your data view with dataset/version selection, a natural-language question field, streamed progress/explanation, generated SQL disclosure, result table, and chart rendering when a validated chart specification is returned.
+- Supply Gemini with only the selected schema, allowed table mapping, current query policy, and the question. Request structured output containing one SQL statement, a concise explanation, and optional chart specification; validate before execution.
+- Parse SQL with a PostgreSQL-aware AST validator. Permit only one `SELECT` or `WITH ... SELECT`; reject data-definition/manipulation, multiple statements, access outside the selected dataset namespace, dangerous functions, and unbounded result shapes.
+- Execute with a dedicated read-only PostgreSQL role, read-only transaction, allowlisted search path, statement timeout, byte/row limits, and parameter binding where parameters are produced separately from SQL.
+- Render only result-derived chart specifications with an allowlisted chart type and columns. Give useful errors for invalid requests without executing rejected SQL.
 
 ### Verification
-- Unit tests for environment validation and config load
-- Integration tests for health endpoints and container startup
-- Smoke test for tracing initialization
 
-### Test examples
-- `tests/test_observability.py`
-  - asserts that Langfuse is initialized when enabled
-  - asserts that health endpoint returns success status
-  - asserts that logs capture generation and query errors
+- Unit tests cover structured response validation, SQL AST policy, prompt-injection-like questions, namespace escape attempts, multi-statements, and unsafe functions.
+- PostgreSQL integration tests prove the read-only role cannot modify data and that timeouts/row limits apply.
+- Tests cover tabular, textual, and aggregate chart-ready result handling.
 
 ---
 
-## Step 9: Full end-to-end verification of the application
+## Step 8: Observability, deployment, and operational safeguards
 
 ### Objective
-Verify that the complete app works as a single integrated system from user input to database output.
 
-### Outcome
-The whole application is validated end-to-end with a success path that includes:
-- schema upload
-- generation from DDL
-- preview of generated data
-- prompt-based table modification
-- storage in PostgreSQL
-- natural-language querying
-- result presentation in table or chart format
-- CSV/ZIP export
+Make the complete service runnable in Docker, diagnosable, and safe for local demonstration use.
 
 ### Implementation tasks
-- Prepare realistic sample DDL files for the supported schemas
-- Run the full application stack using Docker Compose
-- Perform complete user workflow in a headless browser or UI automation test
-- Validate export and persistence results
-- Validate natural language SQL query behavior on real data
+
+- Instrument generation, edit, export, and query workflows with Langfuse traces, including model/version, latency, validation outcome, and dataset/version IDs. Redact secrets, credentials, raw generated values, and user prompts by default; permit enhanced content capture only through explicit local configuration.
+- Configure structured application logs, correlation IDs, health/readiness checks, graceful shutdown, and error handling that returns actionable messages without internals or secrets.
+- Finalize container configuration, migration/startup sequencing, local run instructions, and known supported/unsupported DDL behavior.
+- Document how to configure Vertex AI Application Default Credentials, Gemini model selection, PostgreSQL, Langfuse, Docker startup, testing, and export behavior.
 
 ### Verification
-Only full end-to-end tests are run in this step.
 
-### Test examples
-- `tests/e2e/test_full_app_flow.py`
-  - uploads a valid DDL schema
-  - enters a generation prompt and sets parameters
-  - clicks Generate and verifies table previews appear
-  - edits one table with a natural-language instruction and verifies the update
-  - queries the database using a natural-language question and verifies a result table/chart appears
-  - exports generated data and verifies the file is created
-  - confirms the generated dataset is available in the talk-to-data view
+- Tests verify configuration validation, trace initialization when enabled/disabled, telemetry redaction, health/readiness behavior, and database-unavailable handling.
+- A Docker Compose smoke test exercises startup, migration, and a health check with no committed secrets.
 
-### Definition of done
-The app is considered complete only if all end-to-end checks pass in a clean environment and the user can complete the full workflow without manual database fixes or broken UI steps.
+---
+
+## Step 9: Full end-to-end verification
+
+### Objective
+
+Validate the complete user journey in a clean Docker environment.
+
+### Implementation tasks
+
+- Add and document realistic supported fixtures, including at least one supplied sample DDL and a multi-table schema.
+- Run browser automation against the Docker Compose stack using a configured test Gemini path or deterministic structured-output test double; a live-model smoke test is optional and clearly separated because it is nondeterministic and credential-dependent.
+- Execute the workflow: upload DDL, supply instructions/parameters, generate, inspect each table, confirm a safe table edit, switch to the new active version, download CSV/ZIP, select the dataset in Talk to your data, and run a safe natural-language query that produces a table or plot.
+
+### Verification and definition of done
+
+- All formatting, lint, unit, integration, and browser end-to-end tests pass from a clean environment.
+- PostgreSQL contains a validated, queryable active dataset version and exports are valid.
+- The UI completes the required workflow without manual database intervention.
+- Gemini integration uses Vertex AI through the Google GenAI SDK, and Langfuse records sanitized key events when enabled.
 
 ---
 
 ## Delivery checklist
 
 Before final submission, confirm that:
-- all unit and integration tests for prior steps pass
-- all end-to-end tests for the full workflow pass
-- the app runs via Docker
-- PostgreSQL contains generated and queryable data
-- Gemini integration works for both generation and natural-language SQL tasks
-- Langfuse tracing records key events
-- exported CSV and ZIP files are downloadable and valid
+
+- supported DDL behavior and unsupported constructs are documented and tested;
+- all tests pass, including the clean-environment end-to-end suite;
+- the app starts through Docker Compose;
+- generated datasets are valid, versioned, exportable, and queryable in PostgreSQL;
+- Gemini structured output/function calling and user-facing streaming are used where specified;
+- Talk-to-your-data is enforced by both application SQL validation and a read-only database role; and
+- Langfuse tracing is enabled when configured and does not expose secrets or raw user/data content by default.
