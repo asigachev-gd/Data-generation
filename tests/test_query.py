@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from app.query import QueryError, QueryPlan, parse_query_plan, validate_query_plan
+from app.query import (
+    QueryError,
+    QueryPlan,
+    parse_query_plan,
+    request_query_plan,
+    validate_query_plan,
+)
 
 
 def _validate(sql: str):  # type: ignore[no-untyped-def]
@@ -45,3 +51,16 @@ def test_query_policy_rejects_escapes_and_mutations(sql: str, message: str) -> N
 def test_structured_query_plan_rejects_extra_or_invalid_model_fields() -> None:
     with pytest.raises(QueryError, match="structured query plan"):
         parse_query_plan({"sql": "SELECT 1", "explanation": "x", "unsafe": True})
+
+
+def test_deterministic_test_double_proposes_a_safe_query() -> None:
+    plan, model, metadata = request_query_plan(
+        question="List customers.",
+        table_mapping={"customers": ["id", "name"]},
+        settings=type("Settings", (), {"deterministic_test_mode": True})(),
+    )
+
+    assert plan.sql == 'SELECT * FROM "customers" ORDER BY "id"'
+    assert model == "deterministic-test-double"
+    assert metadata["test_double"] is True
+    validate_query_plan(plan, allowed_tables={"customers"}, storage_schema="dg_selected_v1")

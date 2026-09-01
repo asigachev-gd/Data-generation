@@ -4,16 +4,24 @@
 
 - [Requirements](reqs/REQUIREMENTS.md)
 - [Implementation plan](reqs/PLAN.md) — implementation scope, milestone gates, supported DDL boundary, dataset versioning, and safe query policy.
+- [Manual smoke tests](MAN_TEST.md) — local startup and browser verification scripts.
 
 ## Current status
 
-Steps 1 through 8 are implemented: the repository contains the Streamlit application scaffold, validated environment configuration, Docker Compose local stack, database/app readiness checks, an AST-based PostgreSQL DDL parser, deterministic constraint-safe synthetic data generation, transactional PostgreSQL dataset persistence with exports, the Data Generation workflow, bounded versioned table edits, safe natural-language querying for persisted dataset versions, and redacted operational telemetry.
+Steps 1 through 9 are implemented: the repository contains the Streamlit application scaffold, validated environment configuration, Docker Compose local stack, database/app readiness checks, an AST-based PostgreSQL DDL parser, deterministic constraint-safe synthetic data generation, transactional PostgreSQL dataset persistence with exports, the Data Generation workflow, bounded versioned table edits, safe natural-language querying for persisted dataset versions, redacted operational telemetry, and clean Docker/browser end-to-end verification.
 
 ## Local development
 
-1. Install Python 3.12 and Docker Desktop, then copy `.env.example` to `.env` and replace its placeholders. Authenticate Vertex AI with Application Default Credentials on the host; do not add service-account keys to this repository. Compose can parse without `.env`, but needs `POSTGRES_PASSWORD` and valid app configuration to start a ready service.
-2. Start the local stack with `docker compose up --build`. Compose waits for PostgreSQL, initializes the application metadata and read-only query role, then starts Streamlit at `http://localhost:8501`; PostgreSQL data persists in the `postgres_data` Docker volume.
-3. Install development dependencies with `python -m pip install -e '.[dev]'`, then run `make lint`, `make test-unit`, and `make test-integration` (or `make verify` for all checks). The integration marker starts its own PostgreSQL container and requires Docker. `uv sync --group dev` is also supported when uv is installed.
+1. Install Python 3.12 and Docker Desktop, then copy `.env.example` to `.env` and replace its placeholders. For live Gemini calls, provide the container with Application Default Credentials or workload identity; do not add service-account keys to this repository. Compose can parse without `.env`, but needs `POSTGRES_PASSWORD` and valid app configuration to start a ready service.
+2. Start the local stack with `docker compose up --build`. Compose waits for PostgreSQL, initializes the application metadata and read-only query role, then starts Streamlit at `http://localhost:8501` by default (set `APP_PORT` to choose another host port); PostgreSQL data persists in the `postgres_data` Docker volume.
+3. Install development dependencies with `python -m pip install -e '.[dev]'`, then run `make lint`, `make test-unit`, and `make test-integration`. For the browser suite, install Chromium once with `python -m playwright install chromium`, then run `make test-e2e`; `make verify` runs all checks. The integration and E2E markers require Docker. `uv sync --group dev` is also supported when uv is installed.
+
+For a credential-free, repeatable manual smoke test of the full UI workflow, set
+`DETERMINISTIC_TEST_MODE=true` in `.env` before starting Compose and follow
+[MAN_TEST.md](MAN_TEST.md). This setting is test-only; keep it `false` for a
+normal Gemini-backed run. A Docker container must have its own ADC or workload
+identity access for live Vertex calls; a host-only ADC login is not mounted into
+the container automatically.
 
 The app configuration fails safely when required settings are missing or malformed. Its container readiness command checks both application configuration and PostgreSQL connectivity; the sidebar distinguishes an unavailable database from an invalid application configuration.
 Configuration tests intentionally read only monkeypatched process environment variables, not a developer's local `.env`, so missing-setting assertions remain reproducible.
@@ -37,5 +45,6 @@ Configuration tests intentionally read only monkeypatched process environment va
 - Query execution uses the dedicated `data_generation_query` NOLOGIN role with only `USAGE`/`SELECT` grants on generated version schemas, a read-only transaction, version-specific search path, three-second statement timeout, a 500-row result cap, and a one-megabyte serialized response cap. The query role is created during metadata initialization; if the deployment login cannot establish it, querying fails closed. The UI shows the validated SQL, result table, concise explanation, and only bar/line/scatter charts whose columns are present in returned results.
 - The bundled sample files currently contain MySQL-only syntax such as `AUTO_INCREMENT`, `ENUM`, and `DATETIME`; they are intentionally rejected until replaced with PostgreSQL equivalents.
 - Generation, edit planning/execution, exports, and queries write correlation-aware JSON logs and optional Langfuse traces containing operational metadata (latency, model when used, validation outcome, and dataset/version IDs). Prompts, SQL, raw generated data, query result values, and credentials are redacted by default. Langfuse activates only when both keys are configured and never blocks a workflow if it is unavailable. Set `OBSERVABILITY_CAPTURE_CONTENT=true` only for explicit local debugging; credentials remain redacted.
+- `tests/fixtures/library_mgm_postgresql.sql` is a PostgreSQL-compatible adaptation of the supplied library-management sample, used by the clean Compose/Playwright workflow test. The original bundled sample files still use MySQL-only constructs and remain intentionally rejected. The E2E Compose override alone sets `DETERMINISTIC_TEST_MODE=true`, which returns locally generated, schema-validated structured profiles/plans and makes no Gemini call; keep it `false` for normal application use. The test uses an ephemeral localhost port, tears down a stale run of its dedicated Compose project before startup, and removes its containers and volume afterwards.
 
 See [the implementation plan](reqs/PLAN.md) for the supported PostgreSQL DDL subset and the full verification criteria.

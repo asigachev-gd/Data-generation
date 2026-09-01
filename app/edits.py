@@ -91,6 +91,36 @@ def request_edit_plan(
         raise EditError(
             "Gemini edit planning is unavailable because application settings are missing."
         )
+    if getattr(settings, "deterministic_test_mode", False):
+        table = schema.table(target_table)
+        assert table is not None
+        editable_text = next(
+            (
+                column.name
+                for column in table.columns
+                if column.name not in set(table.primary_key)
+                and column.name
+                not in {name for key in table.unique_constraints for name in key.columns}
+                and column.name not in {name for key in table.foreign_keys for name in key.columns}
+                and column.data_type.name in {"text", "character", "character varying"}
+            ),
+            None,
+        )
+        if editable_text is None:
+            raise EditError("The deterministic test double needs an editable text column.")
+        payload = {
+            "target_table": target_table,
+            "target_columns": [editable_text],
+            "operation": "change_generator_parameter",
+            "generator_parameters": {"text_prefix": "E2E "},
+            "expected_row_count_effect": 0,
+            "explanation": "Deterministic browser-test edit proposal.",
+        }
+        return (
+            parse_edit_plan(schema, payload, target_table=target_table),
+            "deterministic-test-double",
+            {**metadata, "test_double": True},
+        )
     try:
         from google import genai
         from google.genai import types

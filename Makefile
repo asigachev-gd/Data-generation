@@ -1,4 +1,4 @@
-.PHONY: format lint test test-unit test-integration verify
+.PHONY: format lint test test-unit test-integration test-e2e verify
 
 format:
 	python -m ruff format .
@@ -15,4 +15,7 @@ test-unit:
 test-integration:
 	python -m pytest -m integration
 
-verify: lint test
+test-e2e:
+	python -m pytest -m e2e
+
+verify: lint test test-e2e

@@ -150,6 +150,15 @@ def request_generation_profile(
         "temperature": temperature,
     }
     fallback = local_generation_profile(schema)
+    if getattr(settings, "deterministic_test_mode", False):
+        # This exists solely for the Docker/browser verification suite.  It exercises the
+        # same JSON validation path as Gemini without making a network or credential call.
+        return (
+            parse_generation_profile(schema, fallback.model_dump()),
+            False,
+            "deterministic-test-double",
+            {**metadata, "test_double": True},
+        )
     if settings is None:
         return fallback, True, None, metadata
     try:

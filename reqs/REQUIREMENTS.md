@@ -79,6 +79,13 @@ By the end of the practice, you need to develop a user-friendly UI and present b
 - Prompts, SQL, generated values, result values, and secrets are redacted by default. `OBSERVABILITY_CAPTURE_CONTENT=true` is an explicit local opt-in for content capture and still never permits credential capture.
 - Docker Compose waits for PostgreSQL health and invokes idempotent `app.bootstrap` metadata/query-role setup before starting Streamlit. The container health check then confirms both valid configuration and database connectivity.
 
+## Implemented end-to-end verification (Step 9)
+
+- A PostgreSQL-compatible library-management fixture adapted from the supplied sample validates a realistic multi-table workflow without weakening the documented DDL boundary; the original MySQL-only sample files remain rejection fixtures.
+- A Playwright browser test starts a clean Docker Compose stack and completes DDL upload, generation, persisted preview, confirmed table edit, immutable version activation, CSV/ZIP downloads, and a safe Talk-to-your-data query.
+- The E2E stack enables the explicit `DETERMINISTIC_TEST_MODE` structured-output double, so it exercises validated generation/edit/query plan handling without live Gemini credentials or nondeterministic model behavior. Normal application runs leave this setting disabled.
+- `MAN_TEST.md` provides local startup instructions and scripted browser smoke tests for supported/rejected DDL, generation, validation, previews, exports, immutable edits, safe querying, restart persistence, and optional live Gemini/Langfuse behavior.
+
 ## Functional Requirements
 
 ### Phase 1: Synthetic Data Generation

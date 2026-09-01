@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from app.ddl import parse_schema
-from app.edits import EditError, apply_edit, parse_edit_plan
+from app.edits import EditError, apply_edit, parse_edit_plan, request_edit_plan
 from app.generation import generate_dataset, local_generation_profile
 
 
@@ -89,3 +89,17 @@ def test_scoped_edit_generates_a_valid_new_dataset_without_changing_foreign_keys
         row["parent_id"] for row in original.rows["child"]
     ]
     assert len(applied.dataset.rows["child"]) == 3
+
+
+def test_deterministic_test_double_proposes_a_valid_edit() -> None:
+    plan, model, metadata = request_edit_plan(
+        _schema(),
+        target_table="child",
+        prompt="Change the note.",
+        settings=type("Settings", (), {"deterministic_test_mode": True})(),
+    )
+
+    assert plan.target_columns == ["note"]
+    assert plan.generator_parameters == {"text_prefix": "E2E "}
+    assert model == "deterministic-test-double"
+    assert metadata["test_double"] is True

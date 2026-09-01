@@ -30,8 +30,9 @@ services:
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
       LANGFUSE_HOST: ${LANGFUSE_HOST:-https://cloud.langfuse.com}
+      DETERMINISTIC_TEST_MODE: ${DETERMINISTIC_TEST_MODE:-false}
     ports:
-      - "8501:8501"
+      - "${APP_PORT:-8501}:8501"
     depends_on:
       db:
         condition: service_healthy

@@ -22,7 +22,7 @@ The implementation must make these boundaries explicit:
 - [x] Step 6: Bounded table-edit and regeneration workflow
 - [x] Step 7: Talk-to-your-data UI and safe query layer
 - [x] Step 8: Observability, deployment, and operational safeguards
-- [ ] Step 9: Full end-to-end verification
+- [x] Step 9: Full end-to-end verification
 
 Each step has a focused verification gate. Component, unit, and integration tests may run in earlier steps; browser-level end-to-end tests are reserved for Step 9.
 
@@ -273,6 +273,14 @@ Validate the complete user journey in a clean Docker environment.
 - PostgreSQL contains a validated, queryable active dataset version and exports are valid.
 - The UI completes the required workflow without manual database intervention.
 - Gemini integration uses Vertex AI through the Google GenAI SDK, and Langfuse records sanitized key events when enabled.
+
+### Delivered
+
+- `tests/fixtures/library_mgm_postgresql.sql` is a supported PostgreSQL adaptation of the bundled library-management sample and exercises three related tables, foreign keys, uniqueness, and a check constraint. The original bundled MySQL samples remain intentionally rejected.
+- `tests/e2e/test_browser_workflow.py` starts a clean Docker Compose project and drives Streamlit with Playwright through upload, generation, persisted preview, confirmed bounded edit, version switch, CSV/ZIP downloads, and Talk-to-your-data query execution.
+- `DETERMINISTIC_TEST_MODE=true` is an explicit test-only Compose setting. It provides locally generated, schema-validated JSON responses for generation profiles, edit plans, and query plans, so browser tests make no Gemini request and need no Vertex credentials. Normal runs keep it `false` and use Gemini as specified.
+- `make test-e2e` runs the browser suite after Chromium is installed with `python -m playwright install chromium`; `make verify` includes formatting, unit, integration, and browser verification.
+- `MAN_TEST.md` documents the equivalent local browser smoke workflow and its expected outcomes, including the deterministic test mode and separately scoped live-Gemini verification.
 
 ---
 

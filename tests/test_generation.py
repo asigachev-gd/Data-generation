@@ -1,6 +1,7 @@
 """Tests for deterministic, local constraint-safe data generation."""
 
 from datetime import date
+from types import SimpleNamespace
 
 import pytest
 
@@ -30,6 +31,22 @@ def test_seeded_generation_is_deterministic_and_valid() -> None:
     assert first.rows == second.rows
     assert first.report.seed == 42
     assert validate_dataset(schema, first.rows) == ()
+
+
+def test_deterministic_test_double_uses_validated_structured_profile() -> None:
+    schema = parse_schema("CREATE TABLE users (id integer PRIMARY KEY, name text NOT NULL);")
+    settings = SimpleNamespace(deterministic_test_mode=True)
+
+    dataset = generate_dataset(schema, row_counts={"users": 2}, seed=4, settings=settings)
+
+    assert dataset.report.model == "deterministic-test-double"
+    assert dataset.report.used_fallback_profile is False
+    assert dataset.report.prompt_metadata == {
+        "instruction_length": 0,
+        "table_count": 1,
+        "temperature": 0.2,
+        "test_double": True,
+    }
 
 
 def test_defaults_nulls_and_type_bounds_are_enforced() -> None:

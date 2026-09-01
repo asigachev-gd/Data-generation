@@ -20,6 +20,7 @@ dependencies = [
 dev = [
   "pytest==8.3.5",
   "pytest-cov==6.0.0",
+  "playwright==1.51.0",
   "ruff==0.9.10",
   "testcontainers[postgres]==4.9.2",
 ]
@@ -28,6 +29,7 @@ dev = [
 dev = [
   "pytest==8.3.5",
   "pytest-cov==6.0.0",
+  "playwright==1.51.0",
   "ruff==0.9.10",
   "testcontainers[postgres]==4.9.2",
 ]
@@ -38,7 +40,10 @@ packages = ["app"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
-markers = ["integration: requires a Docker-backed PostgreSQL container"]
+markers = [
+  "integration: requires a Docker-backed PostgreSQL container",
+  "e2e: requires Docker Compose and a locally installed Playwright Chromium browser",
+]
 
 [tool.ruff]
 target-version = "py312"

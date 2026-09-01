@@ -131,6 +131,21 @@ def request_query_plan(
 
     if not question.strip():
         raise QueryError("Ask a question about the selected dataset first.")
+    if getattr(settings, "deterministic_test_mode", False):
+        table_name, columns = next(iter(table_mapping.items()))
+        # Table names originate from the validated schema; quoting keeps the test double
+        # correct for otherwise valid mixed-case identifiers.
+        escaped_table = table_name.replace('"', '""')
+        escaped_column = columns[0].replace('"', '""')
+        payload = {
+            "sql": f'SELECT * FROM "{escaped_table}" ORDER BY "{escaped_column}"',
+            "explanation": "Deterministic browser-test query result.",
+        }
+        return (
+            parse_query_plan(payload),
+            "deterministic-test-double",
+            {"question_length": len(question), "test_double": True},
+        )
     try:
         from google import genai
         from google.genai import types
