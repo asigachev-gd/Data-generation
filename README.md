@@ -7,7 +7,7 @@
 
 ## Current status
 
-Steps 1 through 4 are implemented: the repository contains the Streamlit application scaffold, validated environment configuration, Docker Compose local stack, database/app readiness checks, an AST-based PostgreSQL DDL parser, deterministic constraint-safe synthetic data generation, and transactional PostgreSQL dataset persistence with exports. The UI intentionally shows placeholders until the later workflow steps are completed.
+Steps 1 through 5 are implemented: the repository contains the Streamlit application scaffold, validated environment configuration, Docker Compose local stack, database/app readiness checks, an AST-based PostgreSQL DDL parser, deterministic constraint-safe synthetic data generation, transactional PostgreSQL dataset persistence with exports, and the Data Generation workflow. Talk to your data remains a placeholder until Step 7.
 
 ## Local development
 
@@ -30,6 +30,7 @@ The app configuration fails safely when required settings are missing or malform
 - `app.persistence.DatasetStore` stores each validated dataset version in its own generated PostgreSQL schema, while keeping dataset/schema/version/request/validation/export metadata in application-owned tables. It never executes the uploaded DDL: it renders quoted identifiers and normalized supported types from the validated schema model.
 - Persistence is transactional: local validation occurs first, PostgreSQL verifies materialized constraints before activation, and a failed attempt cannot replace an active version. Failed attempts retain diagnostic metadata without retained generated tables.
 - CSV exports are UTF-8 and ZIP exports contain every version table plus `manifest.json`; both are scoped to a selected dataset/version (or that dataset's active version) and are audit logged.
+- The Data Generation view accepts UTF-8 `.sql`, `.ddl`, and `.txt` files, shows source-aware parser errors, and only generates after **Generate** is pressed. It offers text instructions, a Gemini profile-planning temperature from 0.0 to 1.0, an optional non-negative seed, and per-table row counts from 1 to 10,000. Previews and downloads are always reloaded from the persisted active dataset version; session state retains only dataset/version identifiers.
 - The bundled sample files currently contain MySQL-only syntax such as `AUTO_INCREMENT`, `ENUM`, and `DATETIME`; they are intentionally rejected until replaced with PostgreSQL equivalents.
 
 See [the implementation plan](reqs/PLAN.md) for the supported PostgreSQL DDL subset and the full verification criteria.

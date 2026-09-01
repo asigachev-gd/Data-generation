@@ -53,6 +53,12 @@ By the end of the practice, you need to develop a user-friendly UI and present b
 - Dataset, schema, immutable version, table-version, request/validation, and export-audit metadata is stored in application-owned PostgreSQL tables. A version becomes active only after database-side constraint validation succeeds; failed materialization keeps diagnostics without replacing an active version.
 - Retrieval is scoped to a dataset and version, defaulting to that dataset's active version. Table CSV exports are UTF-8, and ZIP exports include every table CSV plus a dataset/version/schema manifest.
 
+## Implemented Data Generation UI (Step 5)
+
+- The Streamlit sidebar provides the required Data Generation and Talk to your data primary views. Data Generation accepts UTF-8 `.sql`, `.ddl`, and `.txt` uploads and presents parser errors with their source context.
+- Users supply instructions, a documented 0.0–1.0 profile-planning temperature, an optional seed, and per-table row counts from 1 through 10,000; no generation starts until **Generate** is selected.
+- After persistence, the active dataset/version, validation-backed generated result, paginated table previews, per-table CSV downloads, and all-table ZIP download are available. Previews are read from PostgreSQL rather than retained in browser session state.
+
 ## Functional Requirements
 
 ### Phase 1: Synthetic Data Generation

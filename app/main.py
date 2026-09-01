@@ -1,8 +1,11 @@
 """Single Streamlit entry point for the Data Generation application."""
 
 import streamlit as st
+from pydantic import ValidationError
 
+from app.config import get_settings
 from app.health import get_health_status
+from app.ui import render_data_generation
 
 st.set_page_config(page_title="Data Generation", page_icon="🧪", layout="wide")
 
@@ -18,6 +21,9 @@ else:
 
 st.title(view)
 if view == "Data Generation":
-    st.info("DDL upload and synthetic generation will be available in Step 5.")
+    try:
+        render_data_generation(st, settings=get_settings())
+    except ValidationError:
+        st.error("Generation is unavailable until application configuration is valid.")
 else:
     st.info("Natural-language querying will be available in Step 7.")

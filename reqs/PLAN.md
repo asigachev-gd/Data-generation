@@ -18,7 +18,7 @@ The implementation must make these boundaries explicit:
 - [x] Step 2: DDL parsing, validation, and schema model
 - [x] Step 3: Structured generation planning and deterministic data generation
 - [x] Step 4: PostgreSQL persistence, versioning, and export
-- [ ] Step 5: Data Generation UI
+- [x] Step 5: Data Generation UI
 - [ ] Step 6: Bounded table-edit and regeneration workflow
 - [ ] Step 7: Talk-to-your-data UI and safe query layer
 - [ ] Step 8: Observability, deployment, and operational safeguards
@@ -164,6 +164,12 @@ Implement the required Streamlit Data Generation workflow.
 
 - Component tests cover accepted/rejected uploads, required-field validation, controls, error rendering, and persisted preview selection.
 - Service/UI integration tests cover upload through successful generation without a browser automation framework.
+
+### Delivered
+
+- The Streamlit sidebar contains exactly the required primary views. Data Generation accepts UTF-8 `.sql`, `.ddl`, and `.txt` uploads, immediately renders source-aware parser errors, and only calls the generation pipeline after **Generate** is selected.
+- The UI provides instructions, a documented 0.0–1.0 Gemini profile-planning temperature, optional reproducibility seed, and validated per-table 1–10,000 row controls. Generation displays status updates and the resulting active dataset/version.
+- Persisted active versions are previewed in paginated per-table tabs and have individual UTF-8 CSV plus all-table ZIP downloads. Browser session state holds only selected dataset/version identifiers; table values are reloaded from PostgreSQL.
 
 ---
 
