@@ -7,7 +7,7 @@
 
 ## Current status
 
-Step 1 is implemented: the repository contains the Streamlit application scaffold, validated environment configuration, Docker Compose local stack, database/app readiness checks, and initial unit/integration test commands. The UI intentionally shows placeholders until the later workflow steps are completed.
+Steps 1 and 2 are implemented: the repository contains the Streamlit application scaffold, validated environment configuration, Docker Compose local stack, database/app readiness checks, and an AST-based PostgreSQL DDL parser with a validated canonical schema model. The UI intentionally shows placeholders until the later workflow steps are completed.
 
 ## Local development
 
@@ -23,5 +23,8 @@ The app configuration fails safely when required settings are missing or malform
 - Synthetic rows are generated and validated locally from Gemini structured generation profiles; this keeps 1,000-row datasets reproducible and constraint-safe.
 - Generated datasets are versioned. Table edits create a validated new version rather than mutating the active version in place.
 - Talk-to-your-data executes only validated read-only queries against the user-selected dataset version.
+- Uploaded DDL is parsed but never executed. The supported PostgreSQL subset is scalar columns; `NOT NULL`, `DEFAULT`, `CHECK`, `UNIQUE`, primary keys, and foreign keys (including composite keys and supplied actions/deferrability). Unsupported SQL and ambiguous schemas fail with source-aware errors.
+- Foreign keys must point to a primary or unique key in the same upload and have compatible normalized types. Cycles are accepted only when every participating reference is nullable or `DEFERRABLE`; the accepted strategy is preserved in the schema metadata.
+- The bundled sample files currently contain MySQL-only syntax such as `AUTO_INCREMENT`, `ENUM`, and `DATETIME`; they are intentionally rejected until replaced with PostgreSQL equivalents.
 
 See [the implementation plan](reqs/PLAN.md) for the supported PostgreSQL DDL subset and the full verification criteria.

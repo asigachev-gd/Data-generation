@@ -34,6 +34,13 @@ By the end of the practice, you need to develop a user-friendly UI and present b
 - `Makefile` defines formatting, lint, unit-test, integration-test, and combined verification commands for local development and CI.
 - The remaining functional capabilities below are planned and will be delivered in their corresponding implementation-plan steps.
 
+## Implemented DDL parsing (Step 2)
+
+- Uploaded PostgreSQL DDL is parsed through a PostgreSQL-aware AST parser and is never executed during parsing.
+- The accepted subset is documented in the implementation plan: scalar columns; `NOT NULL`, `DEFAULT`, `CHECK`, `UNIQUE`, primary keys, and foreign keys, including composite keys and supplied foreign-key actions/deferrability.
+- The parser preserves normalized schema metadata and source positions, rejects unsupported or ambiguous SQL with actionable errors, validates foreign-key targets/type compatibility, and classifies allowable nullable/deferred cycles.
+- The repository's current sample DDL files use MySQL-only constructs (`AUTO_INCREMENT`, `ENUM`, and `DATETIME`) and are intentionally rejected until PostgreSQL equivalents are supplied.
+
 ## Functional Requirements
 
 ### Phase 1: Synthetic Data Generation

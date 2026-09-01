@@ -15,7 +15,7 @@ The implementation must make these boundaries explicit:
 ## Step checklist
 
 - [x] Step 1: Project scaffold, configuration, and local stack
-- [ ] Step 2: DDL parsing, validation, and schema model
+- [x] Step 2: DDL parsing, validation, and schema model
 - [ ] Step 3: Structured generation planning and deterministic data generation
 - [ ] Step 4: PostgreSQL persistence, versioning, and export
 - [ ] Step 5: Data Generation UI
@@ -78,6 +78,13 @@ Convert an uploaded `.sql`, `.ddl`, or `.txt` file containing supported PostgreS
 - Unit tests cover each supported constraint, quoted names, composite primary/foreign keys, defaults, checks, and validation errors.
 - Fixture tests include the supplied sample schemas when they are added to the repository and at least one five-to-seven-table schema.
 - Integration tests verify dependency ordering and supported-cycle classification.
+
+### Delivered
+
+- `app.ddl.parse_schema` uses the PostgreSQL parser supplied by `pglast`; it only parses uploaded DDL and never executes it.
+- `app.schema` provides immutable canonical models for scalar types, columns, composite constraints, foreign keys, source positions, dependency graph, and cycle strategy.
+- Validation rejects unsupported statements/features, duplicate or unknown identifiers, invalid referenced keys, incompatible foreign-key types, and unsafe cycles with actionable source context.
+- `tests/test_ddl.py` covers quoted identifiers, type parameters, defaults/checks, composite keys, foreign-key actions/deferrability, dependency order, validation failures, accepted cycles, and safe rejection of the bundled MySQL sample.
 
 ---
 
