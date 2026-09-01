@@ -1,0 +1,11 @@
+services:
+  app:
+    environment:
+      GOOGLE_CLOUD_PROJECT: e2e-test-project
+      GOOGLE_CLOUD_LOCATION: us-central1
+      VERTEX_AI_ENABLED: "true"
+      POSTGRES_PASSWORD: e2e-test-password
+      DETERMINISTIC_TEST_MODE: "true"
+  db:
+    environment:
+      POSTGRES_PASSWORD: e2e-test-password
