@@ -21,7 +21,7 @@ The implementation must make these boundaries explicit:
 - [x] Step 5: Data Generation UI
 - [x] Step 6: Bounded table-edit and regeneration workflow
 - [x] Step 7: Talk-to-your-data UI and safe query layer
-- [ ] Step 8: Observability, deployment, and operational safeguards
+- [x] Step 8: Observability, deployment, and operational safeguards
 - [ ] Step 9: Full end-to-end verification
 
 Each step has a focused verification gate. Component, unit, and integration tests may run in earlier steps; browser-level end-to-end tests are reserved for Step 9.
@@ -245,6 +245,13 @@ Make the complete service runnable in Docker, diagnosable, and safe for local de
 
 - Tests verify configuration validation, trace initialization when enabled/disabled, telemetry redaction, health/readiness behavior, and database-unavailable handling.
 - A Docker Compose smoke test exercises startup, migration, and a health check with no committed secrets.
+
+### Delivered
+
+- `app.observability` supplies correlation-aware JSON application logs and a fail-open Langfuse adapter. Generation, edit planning/execution, exports, and queries record workflow name, latency, model where applicable, validation outcome, and dataset/version identifiers.
+- Telemetry and logs redact credentials, prompts, SQL, generated rows, and result content by default. `OBSERVABILITY_CAPTURE_CONTENT=true` is an explicit local-only opt-in; it does not unredact credentials.
+- Langfuse is disabled unless both keys are configured, initialization/export failures cannot interrupt an application workflow, and process shutdown attempts an SDK flush. Compose waits for PostgreSQL health, then runs idempotent application metadata/role setup through `app.bootstrap` before starting Streamlit; the existing health/readiness command remains the deployment readiness gate.
+- Docker packaging uses pinned Langfuse dependencies, non-root execution, PostgreSQL readiness sequencing, and documented environment-based Vertex AI / Langfuse configuration without committed secrets.
 
 ---
 

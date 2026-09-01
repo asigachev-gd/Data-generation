@@ -72,6 +72,13 @@ By the end of the practice, you need to develop a user-friendly UI and present b
 - The query policy permits one `SELECT` or `WITH ... SELECT` over only the selected version's unqualified tables. It rejects multiple statements, DDL/DML (including data-changing CTEs), schema-qualified names, unsafe functions, locks, `SELECT INTO`, and unresolved parameters.
 - Every accepted query runs through the dedicated `data_generation_query` read-only role with a selected-version search path, read-only transaction, three-second statement timeout, 500-row cap, and one-megabyte response limit. If the role cannot be established, querying fails closed.
 
+## Implemented observability and operational safeguards (Step 8)
+
+- Generation, edit proposal/execution, CSV/ZIP export, and querying emit correlation-aware structured application logs and optional Langfuse workflow traces. Events include operation, latency, model where applicable, validation outcome, and dataset/version identifiers.
+- Telemetry is disabled unless both Langfuse keys are configured. It is fail-open: unavailable Langfuse initialization, trace updates, or flushing never block generation, exports, edits, or queries.
+- Prompts, SQL, generated values, result values, and secrets are redacted by default. `OBSERVABILITY_CAPTURE_CONTENT=true` is an explicit local opt-in for content capture and still never permits credential capture.
+- Docker Compose waits for PostgreSQL health and invokes idempotent `app.bootstrap` metadata/query-role setup before starting Streamlit. The container health check then confirms both valid configuration and database connectivity.
+
 ## Functional Requirements
 
 ### Phase 1: Synthetic Data Generation

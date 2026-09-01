@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     langfuse_public_key: SecretStr | None = None
     langfuse_secret_key: SecretStr | None = None
     langfuse_host: str = "https://cloud.langfuse.com"
+    observability_capture_content: bool = False
 
     @field_validator("google_cloud_project")
     @classmethod

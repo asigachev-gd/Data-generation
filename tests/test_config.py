@@ -22,6 +22,7 @@ def test_required_settings_load_from_environment(monkeypatch: pytest.MonkeyPatch
 
     assert settings.postgres_port == 5432
     assert settings.vertex_ai_enabled is True
+    assert settings.observability_capture_content is False
     assert "not-a-real-secret" not in repr(settings)
 
 

@@ -8,6 +8,7 @@ from typing import Any, Protocol
 from app.ddl import DDLError, parse_schema
 from app.edits import AppliedEdit, EditError, EditPlan, apply_edit, request_edit_plan
 from app.generation import MAX_ROW_COUNT, MIN_ROW_COUNT, generate_dataset
+from app.observability import get_telemetry
 from app.persistence import DatasetStore, PersistedVersion
 from app.query import (
     QueryError,
@@ -85,16 +86,28 @@ def run_generation(
 ) -> PersistedVersion:
     """Run the parse/generate/persist pipeline used by the Generate button."""
 
-    schema = parse_schema(decode_ddl_upload(upload))
-    dataset = generate_dataset(
-        schema,
-        row_counts=inputs.row_counts,
-        seed=inputs.seed,
-        instructions=inputs.instructions,
-        settings=settings,
-        temperature=inputs.temperature,
-    )
-    return store.persist_dataset(schema, dataset)
+    with get_telemetry().workflow(
+        "generation",
+        model=getattr(settings, "gemini_model", None),
+        table_count=len(inputs.row_counts),
+        requested_rows=sum(inputs.row_counts.values()),
+    ) as outcome:
+        schema = parse_schema(decode_ddl_upload(upload))
+        dataset = generate_dataset(
+            schema,
+            row_counts=inputs.row_counts,
+            seed=inputs.seed,
+            instructions=inputs.instructions,
+            settings=settings,
+            temperature=inputs.temperature,
+        )
+        stored = store.persist_dataset(schema, dataset)
+        outcome.update(
+            validation_outcome="success", used_fallback_profile=dataset.report.used_fallback_profile
+        )
+        if hasattr(stored, "dataset_id") and hasattr(stored, "version_id"):
+            outcome.update(dataset_id=str(stored.dataset_id), version_id=str(stored.version_id))
+        return stored
 
 
 def propose_table_edit(
@@ -114,9 +127,14 @@ def propose_table_edit(
     if not version.active:
         raise ValueError("Select the active dataset version before proposing an edit.")
     schema = store.schema_for_version(dataset_id, version_id)
-    return request_edit_plan(
-        schema, target_table=target_table, prompt=prompt.strip(), settings=settings
-    )
+    with get_telemetry().workflow(
+        "edit_plan", model=getattr(settings, "gemini_model", None), target_table=target_table
+    ) as outcome:
+        result = request_edit_plan(
+            schema, target_table=target_table, prompt=prompt.strip(), settings=settings
+        )
+        outcome.update(dataset_id=dataset_id, version_id=version_id, validation_outcome="success")
+        return result
 
 
 def execute_table_edit(
@@ -159,15 +177,19 @@ def execute_table_edit(
         "validation": {"valid": True, "errors": []},
         "affected_rows": applied.affected_rows,
     }
-    stored = store.persist_dataset(
-        schema,
-        applied.dataset,
-        dataset_id=dataset_id,
-        request_kind="edit",
-        request_metadata=metadata,
-        parent_version_id=version_id,
-    )
-    return stored, applied
+    with get_telemetry().workflow(
+        "edit", model=model, dataset_id=dataset_id, version_id=version_id
+    ) as outcome:
+        stored = store.persist_dataset(
+            schema,
+            applied.dataset,
+            dataset_id=dataset_id,
+            request_kind="edit",
+            request_metadata=metadata,
+            parent_version_id=version_id,
+        )
+        outcome.update(version_id=str(stored.version_id), affected_rows=applied.affected_rows)
+        return stored, applied
 
 
 def _table_row_count(store: DatasetStore, dataset_id: str, version_id: str, table_name: str) -> int:
@@ -185,15 +207,23 @@ def answer_data_question(
     table_mapping = {
         table.name: [column.name for column in table.columns] for table in schema.tables
     }
-    plan, _, _ = request_query_plan(
-        question=question, table_mapping=table_mapping, settings=settings
-    )
-    validated = validate_query_plan(
-        plan, allowed_tables=set(table_mapping), storage_schema=version.storage_schema
-    )
-    return execute_validated_query(
-        store.dsn, storage_schema=version.storage_schema, query=validated
-    )
+    with get_telemetry().workflow(
+        "query",
+        model=getattr(settings, "gemini_model", None),
+        dataset_id=dataset_id,
+        version_id=version_id,
+    ) as outcome:
+        plan, _, _ = request_query_plan(
+            question=question, table_mapping=table_mapping, settings=settings
+        )
+        validated = validate_query_plan(
+            plan, allowed_tables=set(table_mapping), storage_schema=version.storage_schema
+        )
+        result = execute_validated_query(
+            store.dsn, storage_schema=version.storage_schema, query=validated
+        )
+        outcome.update(validation_outcome="success", result_row_count=len(result.rows))
+        return result
 
 
 def render_talk_to_data(st: Any, *, settings: Any) -> None:

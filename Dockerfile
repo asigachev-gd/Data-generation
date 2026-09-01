@@ -16,4 +16,4 @@ RUN chown -R appuser:appuser /app
 
 USER appuser
 EXPOSE 8501
-CMD ["streamlit", "run", "app/main.py", "--server.address=0.0.0.0", "--server.port=8501"]
+CMD ["sh", "-c", "python -m app.bootstrap && exec streamlit run app/main.py --server.address=0.0.0.0 --server.port=8501"]

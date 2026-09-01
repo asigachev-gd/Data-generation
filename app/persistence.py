@@ -20,6 +20,7 @@ from psycopg.types.json import Jsonb
 
 from app.ddl import parse_schema
 from app.generation import GeneratedDataset, validate_dataset
+from app.observability import get_telemetry
 from app.schema import Column, ForeignKey, Schema, Table
 
 METADATA_SCHEMA = "data_generation"
@@ -421,58 +422,76 @@ class DatasetStore:
     ) -> bytes:
         """Create a UTF-8 CSV for a selected table and audit the export."""
 
-        version = self.get_version(dataset_id, version_id)
-        self._verify_table(version, table_name)
-        output = io.StringIO(newline="")
-        with (
-            psycopg.connect(self.dsn, row_factory=dict_row) as connection,
-            connection.cursor() as cursor,
-        ):
-            cursor.execute(
-                sql.SQL("SELECT * FROM {}.{}").format(
-                    sql.Identifier(version.storage_schema), sql.Identifier(table_name)
+        with get_telemetry().workflow(
+            "export", export_kind="csv", table_name=table_name
+        ) as outcome:
+            version = self.get_version(dataset_id, version_id)
+            self._verify_table(version, table_name)
+            output = io.StringIO(newline="")
+            with (
+                psycopg.connect(self.dsn, row_factory=dict_row) as connection,
+                connection.cursor() as cursor,
+            ):
+                cursor.execute(
+                    sql.SQL("SELECT * FROM {}.{}").format(
+                        sql.Identifier(version.storage_schema), sql.Identifier(table_name)
+                    )
                 )
+                rows = cursor.fetchall()
+                writer = csv.DictWriter(
+                    output,
+                    fieldnames=[item.name for item in cursor.description],
+                    lineterminator="\n",
+                )
+                writer.writeheader()
+                writer.writerows(rows)
+            self._audit_export(version.version_id, "csv", table_name)
+            result = output.getvalue().encode("utf-8")
+            outcome.update(
+                dataset_id=str(version.dataset_id),
+                version_id=str(version.version_id),
+                bytes=len(result),
             )
-            rows = cursor.fetchall()
-            writer = csv.DictWriter(
-                output, fieldnames=[item.name for item in cursor.description], lineterminator="\n"
-            )
-            writer.writeheader()
-            writer.writerows(rows)
-        self._audit_export(version.version_id, "csv", table_name)
-        return output.getvalue().encode("utf-8")
+            return result
 
     def export_zip(
         self, dataset_id: uuid.UUID | str, *, version_id: uuid.UUID | str | None = None
     ) -> bytes:
         """Create a ZIP with all CSV tables and a manifest for the selected version."""
 
-        version = self.get_version(dataset_id, version_id)
-        table_names = self._table_names(version)
-        output = io.BytesIO()
-        with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            for table_name in table_names:
+        with get_telemetry().workflow("export", export_kind="zip") as outcome:
+            version = self.get_version(dataset_id, version_id)
+            table_names = self._table_names(version)
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                for table_name in table_names:
+                    archive.writestr(
+                        f"{table_name}.csv",
+                        self.export_csv(dataset_id, table_name, version_id=version.version_id),
+                    )
                 archive.writestr(
-                    f"{table_name}.csv",
-                    self.export_csv(dataset_id, table_name, version_id=version.version_id),
+                    "manifest.json",
+                    json.dumps(
+                        {
+                            "dataset_id": str(version.dataset_id),
+                            "version_id": str(version.version_id),
+                            "version_number": version.version_number,
+                            "tables": table_names,
+                            "schema": version.schema,
+                        },
+                        default=_jsonable,
+                        sort_keys=True,
+                        indent=2,
+                    ),
                 )
-            archive.writestr(
-                "manifest.json",
-                json.dumps(
-                    {
-                        "dataset_id": str(version.dataset_id),
-                        "version_id": str(version.version_id),
-                        "version_number": version.version_number,
-                        "tables": table_names,
-                        "schema": version.schema,
-                    },
-                    default=_jsonable,
-                    sort_keys=True,
-                    indent=2,
-                ),
+            self._audit_export(version.version_id, "zip", None)
+            result = output.getvalue()
+            outcome.update(
+                dataset_id=str(version.dataset_id),
+                version_id=str(version.version_id),
+                bytes=len(result),
             )
-        self._audit_export(version.version_id, "zip", None)
-        return output.getvalue()
+            return result
 
     def _create_table(self, cursor: psycopg.Cursor[Any], storage_schema: str, table: Table) -> None:
         definitions = [
