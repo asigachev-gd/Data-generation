@@ -32,6 +32,7 @@ By the end of the practice, you need to develop a user-friendly UI and present b
 - Configuration is loaded from environment variables with typed validation. Vertex AI is configured for Application Default Credentials; no service-account key is stored in the repository.
 - Docker Compose health checks PostgreSQL before starting the app and the app checks its configuration and PostgreSQL connection separately. The Streamlit sidebar exposes the resulting readiness state.
 - `Makefile` defines formatting, lint, unit-test, integration-test, and combined verification commands for local development and CI.
+- Configuration tests isolate process environment variables from any local `.env` file, keeping missing and malformed setting checks reproducible.
 - The remaining functional capabilities below are planned and will be delivered in their corresponding implementation-plan steps.
 
 ## Implemented DDL parsing (Step 2)
@@ -58,6 +59,12 @@ By the end of the practice, you need to develop a user-friendly UI and present b
 - The Streamlit sidebar provides the required Data Generation and Talk to your data primary views. Data Generation accepts UTF-8 `.sql`, `.ddl`, and `.txt` uploads and presents parser errors with their source context.
 - Users supply instructions, a documented 0.0–1.0 profile-planning temperature, an optional seed, and per-table row counts from 1 through 10,000; no generation starts until **Generate** is selected.
 - After persistence, the active dataset/version, validation-backed generated result, paginated table previews, per-table CSV downloads, and all-table ZIP download are available. Previews are read from PostgreSQL rather than retained in browser session state.
+
+## Implemented bounded table edits (Step 6)
+
+- A text request is sent to Gemini only to produce a strict JSON edit plan for the explicitly selected active table. The plan is displayed for review and must be confirmed before any data changes.
+- Edits are deliberately limited to non-primary-key, non-unique, non-foreign-key columns. Supported safe changes regenerate matching values, add a bounded `text_prefix` for text generators, or set a nullable column's `null_probability`; unsupported relational changes are rejected rather than partially applied.
+- A confirmed edit reloads the persisted version, revalidates every row and database constraint, and writes a new immutable active version. The prior version is retained, and edit metadata records parent-version lineage, the original request, validated plan, model metadata, and redacted telemetry fields.
 
 ## Functional Requirements
 

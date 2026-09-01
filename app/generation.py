@@ -425,20 +425,22 @@ def _primary_value(column: Column, index: int) -> Any:
 
 
 def _generate_value(column: Column, profile: ColumnProfile, index: int, rng: random.Random) -> Any:
-    if column.nullable and profile.allow_null and rng.random() < 0.1:
+    null_probability = float(profile.parameters.get("null_probability", 0.1))
+    if column.nullable and profile.allow_null and rng.random() < null_probability:
         return None
     default = _default_value(column.default, column)
     if default is not None:
         return default
     category, data_type = profile.semantic_category, column.data_type.name
+    text_prefix = str(profile.parameters.get("text_prefix", ""))
     if category == "email":
-        return f"user{index + 1}@example.test"
+        return f"{text_prefix}user{index + 1}@example.test"
     if category == "name":
-        return f"Sample Name {index + 1}"
+        return f"{text_prefix}Sample Name {index + 1}"
     if category == "phone":
-        return f"+1-555-{index % 10000:04d}"
+        return f"{text_prefix}+1-555-{index % 10000:04d}"
     if category == "address":
-        return f"{index + 1} Example Street"
+        return f"{text_prefix}{index + 1} Example Street"
     if data_type in {"smallint", "integer", "bigint"}:
         return rng.randint(1, 1_000_000)
     if data_type in {"real", "double precision"}:
@@ -452,9 +454,9 @@ def _generate_value(column: Column, profile: ColumnProfile, index: int, rng: ran
         )
     if data_type in {"character varying", "character"}:
         limit = column.data_type.parameters[0] if column.data_type.parameters else 255
-        return f"sample-{index + 1}"[:limit]
+        return f"{text_prefix}sample-{index + 1}"[:limit]
     if data_type == "text":
-        return f"Synthetic {category} value {index + 1}"
+        return f"{text_prefix}Synthetic {category} value {index + 1}"
     if data_type == "boolean":
         return bool(rng.getrandbits(1))
     if data_type == "date":
@@ -470,7 +472,7 @@ def _generate_value(column: Column, profile: ColumnProfile, index: int, rng: ran
         return {"index": index + 1, "synthetic": True}
     if data_type == "bytea":
         return f"synthetic-{index + 1}".encode()
-    return f"value-{index + 1}"
+    return f"{text_prefix}value-{index + 1}"
 
 
 def _default_value(default: str | None, column: Column) -> Any | None:

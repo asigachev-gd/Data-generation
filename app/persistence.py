@@ -18,6 +18,7 @@ from psycopg import sql
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from app.ddl import parse_schema
 from app.generation import GeneratedDataset, validate_dataset
 from app.schema import Column, ForeignKey, Schema, Table
 
@@ -52,6 +53,8 @@ class DatasetVersion:
     active: bool
     schema: dict[str, Any]
     report: dict[str, Any]
+    original_ddl: str
+    parent_version_id: uuid.UUID | None
 
 
 class DatasetStore:
@@ -92,10 +95,21 @@ class DatasetStore:
                         status text NOT NULL CHECK (status IN ('pending', 'active', 'failed')),
                         generation_report jsonb NOT NULL,
                         failure_reason text NULL,
+                        parent_version_id uuid NULL,
                         created_at timestamptz NOT NULL DEFAULT now(),
                         UNIQUE (dataset_id, version_number)
                     )
                     """
+                ).format(
+                    sql.Identifier(METADATA_SCHEMA),
+                    sql.Identifier(METADATA_SCHEMA),
+                )
+            )
+            cursor.execute(
+                sql.SQL(
+                    "ALTER TABLE {}.dataset_versions "
+                    "ADD COLUMN IF NOT EXISTS parent_version_id uuid NULL "
+                    "REFERENCES {}.dataset_versions(id)"
                 ).format(sql.Identifier(METADATA_SCHEMA), sql.Identifier(METADATA_SCHEMA))
             )
             cursor.execute(
@@ -146,6 +160,9 @@ class DatasetStore:
         *,
         name: str = "Generated dataset",
         dataset_id: uuid.UUID | str | None = None,
+        request_kind: str = "generation",
+        request_metadata: dict[str, Any] | None = None,
+        parent_version_id: uuid.UUID | str | None = None,
     ) -> PersistedVersion:
         """Atomically materialize a dataset version and make it the active version."""
 
@@ -172,8 +189,9 @@ class DatasetStore:
                     )
                 cursor.execute(
                     sql.SQL("""INSERT INTO {}.dataset_versions
-                    (id, dataset_id, version_number, storage_schema, status, generation_report)
-                    VALUES (%s, %s, %s, %s, 'pending', %s)""").format(
+                    (id, dataset_id, version_number, storage_schema, status, generation_report,
+                    parent_version_id)
+                    VALUES (%s, %s, %s, %s, 'pending', %s, %s)""").format(
                         sql.Identifier(METADATA_SCHEMA)
                     ),
                     (
@@ -182,6 +200,7 @@ class DatasetStore:
                         version_number,
                         storage_schema,
                         _jsonb(asdict(dataset.report)),
+                        uuid.UUID(str(parent_version_id)) if parent_version_id else None,
                     ),
                 )
                 cursor.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(storage_schema)))
@@ -216,14 +235,17 @@ class DatasetStore:
                 )
                 cursor.execute(
                     sql.SQL("""INSERT INTO {}.generation_requests
-                    (id, version_id, request_kind, request_metadata, validation_report)
-                    VALUES (%s, %s, 'generation', %s, %s)""").format(
+                        (id, version_id, request_kind, request_metadata, validation_report)
+                    VALUES (%s, %s, %s, %s, %s)""").format(
                         sql.Identifier(METADATA_SCHEMA)
                     ),
                     (
-                        uuid.uuid4(),
-                        version_id,
-                        Jsonb(dataset.report.prompt_metadata or {}),
+                        uuid.uuid4(), version_id, request_kind,
+                        Jsonb(
+                            request_metadata
+                            if request_metadata is not None
+                            else dataset.report.prompt_metadata or {}
+                        ),
                         Jsonb({"valid": True, "errors": []}),
                     ),
                 )
@@ -257,7 +279,7 @@ class DatasetStore:
                 cursor.execute(
                     sql.SQL("""SELECT d.id AS dataset_id, v.id AS version_id, v.version_number,
                     v.storage_schema, v.status, d.active_version_id = v.id AS active,
-                    d.schema_model, v.generation_report
+                    d.schema_model, v.generation_report, d.original_ddl, v.parent_version_id
                     FROM {}.datasets d JOIN {}.dataset_versions v ON v.id = d.active_version_id
                     WHERE d.id = %s""").format(
                         sql.Identifier(METADATA_SCHEMA), sql.Identifier(METADATA_SCHEMA)
@@ -268,7 +290,7 @@ class DatasetStore:
                 cursor.execute(
                     sql.SQL("""SELECT d.id AS dataset_id, v.id AS version_id, v.version_number,
                     v.storage_schema, v.status, d.active_version_id = v.id AS active,
-                    d.schema_model, v.generation_report
+                    d.schema_model, v.generation_report, d.original_ddl, v.parent_version_id
                     FROM {}.datasets d JOIN {}.dataset_versions v ON v.dataset_id = d.id
                     WHERE d.id = %s AND v.id = %s""").format(
                         sql.Identifier(METADATA_SCHEMA), sql.Identifier(METADATA_SCHEMA)
@@ -287,7 +309,16 @@ class DatasetStore:
             item["active"],
             item["schema_model"],
             item["generation_report"],
+            item["original_ddl"],
+            item["parent_version_id"],
         )
+
+    def schema_for_version(
+        self, dataset_id: uuid.UUID | str, version_id: uuid.UUID | str | None = None
+    ) -> Schema:
+        """Rebuild the trusted canonical model retained with the selected dataset."""
+
+        return parse_schema(self.get_version(dataset_id, version_id).original_ddl)
 
     def table_rows(
         self,

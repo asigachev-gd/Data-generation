@@ -7,7 +7,7 @@
 
 ## Current status
 
-Steps 1 through 5 are implemented: the repository contains the Streamlit application scaffold, validated environment configuration, Docker Compose local stack, database/app readiness checks, an AST-based PostgreSQL DDL parser, deterministic constraint-safe synthetic data generation, transactional PostgreSQL dataset persistence with exports, and the Data Generation workflow. Talk to your data remains a placeholder until Step 7.
+Steps 1 through 6 are implemented: the repository contains the Streamlit application scaffold, validated environment configuration, Docker Compose local stack, database/app readiness checks, an AST-based PostgreSQL DDL parser, deterministic constraint-safe synthetic data generation, transactional PostgreSQL dataset persistence with exports, the Data Generation workflow, and bounded versioned table edits. Talk to your data remains a placeholder until Step 7.
 
 ## Local development
 
@@ -16,6 +16,7 @@ Steps 1 through 5 are implemented: the repository contains the Streamlit applica
 3. Install development dependencies with `python -m pip install -e '.[dev]'`, then run `make lint`, `make test-unit`, and `make test-integration` (or `make verify` for all checks). The integration marker starts its own PostgreSQL container and requires Docker. `uv sync --group dev` is also supported when uv is installed.
 
 The app configuration fails safely when required settings are missing or malformed. Its container readiness command checks both application configuration and PostgreSQL connectivity; the sidebar distinguishes an unavailable database from an invalid application configuration.
+Configuration tests intentionally read only monkeypatched process environment variables, not a developer's local `.env`, so missing-setting assertions remain reproducible.
 
 ## Current design decisions
 
@@ -31,6 +32,7 @@ The app configuration fails safely when required settings are missing or malform
 - Persistence is transactional: local validation occurs first, PostgreSQL verifies materialized constraints before activation, and a failed attempt cannot replace an active version. Failed attempts retain diagnostic metadata without retained generated tables.
 - CSV exports are UTF-8 and ZIP exports contain every version table plus `manifest.json`; both are scoped to a selected dataset/version (or that dataset's active version) and are audit logged.
 - The Data Generation view accepts UTF-8 `.sql`, `.ddl`, and `.txt` files, shows source-aware parser errors, and only generates after **Generate** is pressed. It offers text instructions, a Gemini profile-planning temperature from 0.0 to 1.0, an optional non-negative seed, and per-table row counts from 1 to 10,000. Previews and downloads are always reloaded from the persisted active dataset version; session state retains only dataset/version identifiers.
+- Table edits require the active dataset/version, an explicitly selected target table, and a Gemini JSON edit proposal that the backend validates and the user confirms. Only non-key/non-FK columns can be changed: matching values may be regenerated, text generators may receive a `text_prefix`, and nullable columns may receive a bounded `null_probability`. Unsafe relational mutations are rejected; successful edits fully validate and activate a new immutable version with parent-version lineage and redacted telemetry metadata.
 - The bundled sample files currently contain MySQL-only syntax such as `AUTO_INCREMENT`, `ENUM`, and `DATETIME`; they are intentionally rejected until replaced with PostgreSQL equivalents.
 
 See [the implementation plan](reqs/PLAN.md) for the supported PostgreSQL DDL subset and the full verification criteria.

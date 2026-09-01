@@ -18,7 +18,7 @@ def test_required_settings_load_from_environment(monkeypatch: pytest.MonkeyPatch
     for name, value in environment().items():
         monkeypatch.setenv(name, value)
 
-    settings = Settings()
+    settings = Settings(_env_file=None)
 
     assert settings.postgres_port == 5432
     assert settings.vertex_ai_enabled is True
@@ -31,7 +31,7 @@ def test_missing_required_setting_does_not_expose_secret(monkeypatch: pytest.Mon
     monkeypatch.delenv("POSTGRES_PASSWORD")
 
     with pytest.raises(ValidationError) as error:
-        Settings()
+        Settings(_env_file=None)
 
     assert "postgres_password" in str(error.value)
     assert "not-a-real-secret" not in str(error.value)
@@ -43,4 +43,4 @@ def test_malformed_port_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("POSTGRES_PORT", "not-a-port")
 
     with pytest.raises(ValidationError, match="postgres_port"):
-        Settings()
+        Settings(_env_file=None)

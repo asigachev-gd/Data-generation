@@ -19,7 +19,7 @@ The implementation must make these boundaries explicit:
 - [x] Step 3: Structured generation planning and deterministic data generation
 - [x] Step 4: PostgreSQL persistence, versioning, and export
 - [x] Step 5: Data Generation UI
-- [ ] Step 6: Bounded table-edit and regeneration workflow
+- [x] Step 6: Bounded table-edit and regeneration workflow
 - [ ] Step 7: Talk-to-your-data UI and safe query layer
 - [ ] Step 8: Observability, deployment, and operational safeguards
 - [ ] Step 9: Full end-to-end verification
@@ -190,6 +190,13 @@ Allow useful natural-language changes without permitting unconstrained mutation 
 
 - Unit tests cover invalid plans, disallowed target tables/columns, and model output that does not conform to the JSON schema.
 - Integration tests cover successful scoped edits, FK-preserving dependent repairs, rejected unsafe edits, version lineage, and rollback.
+
+### Delivered
+
+- `app.edits` defines a strict structured edit-plan schema and validates the explicit UI target, table/column membership, zero row-count effect, bounded equality scope, and supported operations. The supported operations are regenerating matching non-key columns, applying a `text_prefix` to text generators, and changing nullable-column `null_probability`.
+- Primary-key, unique-key, and foreign-key columns are rejected because their safe relational impact cannot be bounded. Consequently, accepted edits require no dependent-table repair; requests that would require it are refused with an actionable explanation.
+- The Data Generation view proposes an edit only for the selected active dataset version, displays its validated JSON plan, and requires confirmation before execution. It reloads all base rows from PostgreSQL, validates the edited dataset, and persists it as a new active immutable version.
+- Edit requests retain parent-version lineage, the original prompt, validated plan, model/model metadata, timestamps, and validation outcome. Telemetry metadata records only redacted prompt characteristics.
 
 ---
 

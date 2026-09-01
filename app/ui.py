@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from app.ddl import DDLError, parse_schema
+from app.edits import AppliedEdit, EditError, EditPlan, apply_edit, request_edit_plan
 from app.generation import MAX_ROW_COUNT, MIN_ROW_COUNT, generate_dataset
 from app.persistence import DatasetStore, PersistedVersion
 
@@ -87,6 +88,84 @@ def run_generation(
         temperature=inputs.temperature,
     )
     return store.persist_dataset(schema, dataset)
+
+
+def propose_table_edit(
+    store: DatasetStore,
+    *,
+    dataset_id: str,
+    version_id: str,
+    target_table: str,
+    prompt: str,
+    settings: Any,
+) -> tuple[EditPlan, str | None, dict[str, Any]]:
+    """Request a bounded edit proposal for the selected immutable version."""
+
+    if not prompt.strip():
+        raise ValueError("Describe the requested table change before proposing an edit.")
+    version = store.get_version(dataset_id, version_id)
+    if not version.active:
+        raise ValueError("Select the active dataset version before proposing an edit.")
+    schema = store.schema_for_version(dataset_id, version_id)
+    return request_edit_plan(
+        schema, target_table=target_table, prompt=prompt.strip(), settings=settings
+    )
+
+
+def execute_table_edit(
+    store: DatasetStore,
+    *,
+    dataset_id: str,
+    version_id: str,
+    plan: EditPlan,
+    prompt: str,
+    model: str | None,
+    model_metadata: dict[str, Any],
+    seed: int | None = None,
+) -> tuple[PersistedVersion, AppliedEdit]:
+    """Apply a confirmed edit to a new version, retaining auditable lineage metadata."""
+
+    version = store.get_version(dataset_id, version_id)
+    if not version.active:
+        raise ValueError("The selected version is no longer active; propose the edit again.")
+    schema = store.schema_for_version(dataset_id, version_id)
+    base_rows = {}
+    for table in schema.tables:
+        row_count = _table_row_count(store, dataset_id, version_id, table.name)
+        base_rows[table.name] = tuple(
+            store.table_rows(
+                dataset_id, table.name, version_id=version_id, limit=1_000, offset=offset
+            )
+            for offset in range(0, row_count, 1_000)
+        )
+    flattened = {
+        name: tuple(row for page in pages for row in page) for name, pages in base_rows.items()
+    }
+    applied = apply_edit(schema, flattened, plan, seed=seed)
+    metadata = {
+        "parent_version_id": version_id,
+        "original_prompt": prompt,
+        "validated_plan": plan.model_dump(),
+        "model": model,
+        "model_metadata": model_metadata,
+        "telemetry": {"prompt_length": len(prompt), "target_table": plan.target_table},
+        "validation": {"valid": True, "errors": []},
+        "affected_rows": applied.affected_rows,
+    }
+    stored = store.persist_dataset(
+        schema,
+        applied.dataset,
+        dataset_id=dataset_id,
+        request_kind="edit",
+        request_metadata=metadata,
+        parent_version_id=version_id,
+    )
+    return stored, applied
+
+
+def _table_row_count(store: DatasetStore, dataset_id: str, version_id: str, table_name: str) -> int:
+    version = store.get_version(dataset_id, version_id)
+    return int(version.report.get("generated_rows", {}).get(table_name, 0))
 
 
 def render_data_generation(st: Any, *, settings: Any) -> None:
@@ -207,6 +286,7 @@ def _render_persisted_dataset(st: Any, settings: Any) -> None:
         file_name=f"dataset-v{version.version_number}.zip",
         mime="application/zip",
     )
+    _render_table_edit(st, settings, store, version, table_names)
     tabs = st.tabs(table_names)
     for tab, table_name in zip(tabs, table_names, strict=True):
         with tab:
@@ -231,3 +311,68 @@ def _render_persisted_dataset(st: Any, settings: Any) -> None:
                 mime="text/csv",
                 key=f"download_{table_name}",
             )
+
+
+def _render_table_edit(
+    st: Any, settings: Any, store: DatasetStore, version: Any, table_names: list[str]
+) -> None:
+    """Render proposal/review/confirmation controls without retaining table values in state."""
+
+    st.markdown("#### Edit a table")
+    target = st.selectbox("Target table", table_names, key="edit_target_table")
+    prompt = st.text_area("Requested change", key="edit_prompt")
+    proposal_key = "pending_edit_proposal"
+    if st.button("Propose edit", disabled=not prompt.strip()):
+        try:
+            plan, model, metadata = propose_table_edit(
+                store,
+                dataset_id=str(version.dataset_id),
+                version_id=str(version.version_id),
+                target_table=target,
+                prompt=prompt,
+                settings=settings,
+            )
+            st.session_state[proposal_key] = {
+                "plan": plan.model_dump(),
+                "model": model,
+                "metadata": metadata,
+                "dataset_id": str(version.dataset_id),
+                "version_id": str(version.version_id),
+                "prompt": prompt,
+            }
+        except (ValueError, EditError) as error:
+            st.error(str(error))
+    pending = st.session_state.get(proposal_key)
+    if not pending:
+        return
+    if (
+        pending["dataset_id"] != str(version.dataset_id)
+        or pending["version_id"] != str(version.version_id)
+    ):
+        st.session_state.pop(proposal_key, None)
+        return
+    st.caption("Review the validated proposal. Confirmation creates a new immutable version.")
+    st.json(pending["plan"])
+    if st.button("Confirm and create new version", type="primary"):
+        try:
+            stored, applied = execute_table_edit(
+                store,
+                dataset_id=pending["dataset_id"],
+                version_id=pending["version_id"],
+                plan=EditPlan.model_validate(pending["plan"]),
+                prompt=pending["prompt"],
+                model=pending["model"],
+                model_metadata=pending["metadata"],
+            )
+            st.session_state["active_dataset_id"] = str(stored.dataset_id)
+            st.session_state["active_version_id"] = str(stored.version_id)
+            st.session_state.pop(proposal_key, None)
+            st.success(
+                f"Edit applied to {applied.affected_rows} row(s); "
+                f"version {stored.version_number} is active."
+            )
+            st.rerun()
+        except (ValueError, EditError) as error:
+            st.error(str(error))
+        except Exception:
+            st.error("The edit could not be persisted. The prior active version remains unchanged.")

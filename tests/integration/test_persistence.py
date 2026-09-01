@@ -10,6 +10,7 @@ import zipfile
 import pytest
 
 from app.ddl import parse_schema
+from app.edits import apply_edit, parse_edit_plan
 from app.generation import generate_dataset, local_generation_profile
 from app.persistence import DatasetStore, PersistenceError
 
@@ -80,3 +81,48 @@ def test_invalid_dataset_is_not_persisted(postgres_dsn: str) -> None:
 
     with pytest.raises(PersistenceError, match="pre-persistence validation"):
         store.persist_dataset(schema, invalid)
+
+
+@pytest.mark.integration
+def test_scoped_edit_creates_active_child_version_with_lineage(postgres_dsn: str) -> None:
+    schema = parse_schema(
+        "CREATE TABLE parent (id integer PRIMARY KEY, label text NOT NULL);"
+        "CREATE TABLE child (id integer PRIMARY KEY, parent_id integer NOT NULL "
+        "REFERENCES parent(id), note text NOT NULL);"
+    )
+    generated = generate_dataset(
+        schema,
+        row_counts={"parent": 2, "child": 3},
+        seed=8,
+        profile=local_generation_profile(schema),
+    )
+    store = DatasetStore(postgres_dsn)
+    initial = store.persist_dataset(schema, generated)
+    plan = parse_edit_plan(
+        schema,
+        {
+            "target_table": "child",
+            "target_columns": ["note"],
+            "operation": "change_generator_parameter",
+            "generator_parameters": {"text_prefix": "Updated "},
+            "expected_row_count_effect": 0,
+            "explanation": "Prefix child notes.",
+        },
+        target_table="child",
+    )
+    edited = apply_edit(schema, generated.rows, plan, seed=12)
+    child = store.persist_dataset(
+        schema,
+        edited.dataset,
+        dataset_id=initial.dataset_id,
+        request_kind="edit",
+        request_metadata={"validated_plan": plan.model_dump()},
+        parent_version_id=initial.version_id,
+    )
+
+    active = store.get_version(initial.dataset_id)
+    assert active.version_id == child.version_id
+    assert active.parent_version_id == initial.version_id
+    assert [row["parent_id"] for row in store.table_rows(child.dataset_id, "child")] == [
+        row["parent_id"] for row in generated.rows["child"]
+    ]
