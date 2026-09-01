@@ -1,0 +1,2 @@
+ - Check the reqs folder and always make sure to follow guidelines specified there, unless specified otherwise.
+ - After each change update the README file and all necessary documentation files in reqs folder.
