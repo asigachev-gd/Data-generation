@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "data-generation"
+version = "0.1.0"
+description = "Constraint-safe synthetic PostgreSQL data generation."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "google-genai==1.60.0",
+  "psycopg[binary]==3.2.6",
+  "pydantic-settings==2.8.1",
+  "streamlit==1.43.2",
+]
+
+[dependency-groups]
+dev = [
+  "pytest==8.3.5",
+  "pytest-cov==6.0.0",
+  "ruff==0.9.10",
+  "testcontainers[postgres]==4.9.2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==8.3.5",
+  "pytest-cov==6.0.0",
+  "ruff==0.9.10",
+  "testcontainers[postgres]==4.9.2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = ["integration: requires a Docker-backed PostgreSQL container"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

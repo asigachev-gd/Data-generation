@@ -26,6 +26,14 @@ By the end of the practice, you need to develop a user-friendly UI and present b
 
 6. Langfuse for observability.
 
+## Implemented foundation (Step 1)
+
+- The project uses Python 3.12, Streamlit, PostgreSQL 16, Docker Compose, and pinned dependencies.
+- Configuration is loaded from environment variables with typed validation. Vertex AI is configured for Application Default Credentials; no service-account key is stored in the repository.
+- Docker Compose health checks PostgreSQL before starting the app and the app checks its configuration and PostgreSQL connection separately. The Streamlit sidebar exposes the resulting readiness state.
+- `Makefile` defines formatting, lint, unit-test, integration-test, and combined verification commands for local development and CI.
+- The remaining functional capabilities below are planned and will be delivered in their corresponding implementation-plan steps.
+
 ## Functional Requirements
 
 ### Phase 1: Synthetic Data Generation
@@ -50,4 +58,3 @@ By the end of the practice, you need to develop a user-friendly UI and present b
    - Generation happens after the user clicks the “Generate” button.
    - After data is generated, the user can preview each generated table.
    - User can apply changes to each table by entering a prompt and clicking the “Submit” button.
-

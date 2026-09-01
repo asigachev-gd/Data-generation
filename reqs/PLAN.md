@@ -14,7 +14,7 @@ The implementation must make these boundaries explicit:
 
 ## Step checklist
 
-- [ ] Step 1: Project scaffold, configuration, and local stack
+- [x] Step 1: Project scaffold, configuration, and local stack
 - [ ] Step 2: DDL parsing, validation, and schema model
 - [ ] Step 3: Structured generation planning and deterministic data generation
 - [ ] Step 4: PostgreSQL persistence, versioning, and export
@@ -48,6 +48,14 @@ Create a reproducible Python/Streamlit project and Docker Compose development st
 - Configuration tests cover missing and malformed required settings without exposing secret values.
 - Docker Compose validation and a smoke start confirm both services become healthy.
 - A database integration fixture starts PostgreSQL without requiring a developer's existing database.
+
+### Delivered
+
+- Python 3.12, PostgreSQL 16, and pinned application/development dependencies are defined in `pyproject.toml`.
+- `compose.yaml` provides an application container and health-checked PostgreSQL 16 service with a persistent named volume; the application runs as a non-root user.
+- `.env.example` documents only safe placeholder configuration and Application Default Credentials usage; Compose can parse without a local `.env`, while a ready application still requires valid configuration.
+- `app.config.Settings` validates typed configuration without rendering secrets; `app.health` reports application configuration and database readiness separately.
+- `tests/` includes configuration/readiness coverage and a Docker-backed PostgreSQL integration fixture. `Makefile` provides `make lint`, `make test-unit`, `make test-integration`, and `make verify` after installing `.[dev]` (or use `uv sync --group dev` if uv is available).
 
 ---
 
