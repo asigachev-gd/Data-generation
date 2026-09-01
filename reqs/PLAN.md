@@ -20,7 +20,7 @@ The implementation must make these boundaries explicit:
 - [x] Step 4: PostgreSQL persistence, versioning, and export
 - [x] Step 5: Data Generation UI
 - [x] Step 6: Bounded table-edit and regeneration workflow
-- [ ] Step 7: Talk-to-your-data UI and safe query layer
+- [x] Step 7: Talk-to-your-data UI and safe query layer
 - [ ] Step 8: Observability, deployment, and operational safeguards
 - [ ] Step 9: Full end-to-end verification
 
@@ -219,6 +219,12 @@ Let users query a selected generated dataset in natural language and receive a t
 - Unit tests cover structured response validation, SQL AST policy, prompt-injection-like questions, namespace escape attempts, multi-statements, and unsafe functions.
 - PostgreSQL integration tests prove the read-only role cannot modify data and that timeouts/row limits apply.
 - Tests cover tabular, textual, and aggregate chart-ready result handling.
+
+### Delivered
+
+- `app.query` accepts only strict Gemini JSON query plans, validates one PostgreSQL `SELECT`/`WITH ... SELECT` AST, permits only selected-version tables and an allowlist of read-only functions, rejects schema escapes, data-changing CTEs, multiple statements, parameters, locks, and `SELECT INTO`, and wraps every accepted result in a 500-row cap.
+- Query execution assumes the `data_generation_query` NOLOGIN role, uses a read-only transaction, version-specific search path, 3-second statement timeout, and 1 MB serialized-result limit. Generated version schemas grant that role only `USAGE` and `SELECT`; inability to establish that role fails closed.
+- The Talk to your data UI selects a persisted dataset/version, shows Gemini's concise explanation and validated SQL, displays table results, and renders only validated bar, line, or scatter charts using returned columns.
 
 ---
 

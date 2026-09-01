@@ -9,6 +9,13 @@ from app.ddl import DDLError, parse_schema
 from app.edits import AppliedEdit, EditError, EditPlan, apply_edit, request_edit_plan
 from app.generation import MAX_ROW_COUNT, MIN_ROW_COUNT, generate_dataset
 from app.persistence import DatasetStore, PersistedVersion
+from app.query import (
+    QueryError,
+    QueryResult,
+    execute_validated_query,
+    request_query_plan,
+    validate_query_plan,
+)
 
 ALLOWED_UPLOAD_SUFFIXES = (".sql", ".ddl", ".txt")
 MIN_TEMPERATURE = 0.0
@@ -166,6 +173,106 @@ def execute_table_edit(
 def _table_row_count(store: DatasetStore, dataset_id: str, version_id: str, table_name: str) -> int:
     version = store.get_version(dataset_id, version_id)
     return int(version.report.get("generated_rows", {}).get(table_name, 0))
+
+
+def answer_data_question(
+    store: DatasetStore, *, dataset_id: str, version_id: str, question: str, settings: Any
+) -> QueryResult:
+    """Plan, validate, and execute a question only against its selected dataset version."""
+
+    version = store.get_version(dataset_id, version_id)
+    schema = store.schema_for_version(dataset_id, version_id)
+    table_mapping = {
+        table.name: [column.name for column in table.columns] for table in schema.tables
+    }
+    plan, _, _ = request_query_plan(
+        question=question, table_mapping=table_mapping, settings=settings
+    )
+    validated = validate_query_plan(
+        plan, allowed_tables=set(table_mapping), storage_schema=version.storage_schema
+    )
+    return execute_validated_query(
+        store.dsn, storage_schema=version.storage_schema, query=validated
+    )
+
+
+def render_talk_to_data(st: Any, *, settings: Any) -> None:
+    """Render selected-version natural-language querying without trusting model SQL."""
+
+    st.header("Talk to your data")
+    st.caption(
+        "Ask about one generated dataset version. Queries are AST-validated SELECT statements, "
+        "run with a read-only role and capped at 500 rows / 1 MB."
+    )
+    try:
+        store = DatasetStore(settings.database_dsn)
+        versions = store.queryable_versions()
+    except Exception:
+        st.warning("Generated datasets are not currently available from PostgreSQL.")
+        return
+    if not versions:
+        st.info("Generate a dataset before asking questions about it.")
+        return
+    preferred = (
+        st.session_state.get("active_dataset_id"),
+        st.session_state.get("active_version_id"),
+    )
+    default_index = next(
+        (
+            index
+            for index, item in enumerate(versions)
+            if (str(item.dataset_id), str(item.version_id)) == preferred
+        ),
+        0,
+    )
+    selected = st.selectbox(
+        "Dataset version",
+        versions,
+        index=default_index,
+        format_func=lambda item: (
+            f"Dataset {item.dataset_id} · version {item.version_number}"
+            + (" (active)" if item.active else "")
+        ),
+    )
+    question = st.text_area(
+        "Question", placeholder="For example: What are the five most common customer cities?"
+    )
+    if not st.button("Ask", type="primary", disabled=not question.strip()):
+        return
+    try:
+        with st.status("Validating a safe query…", expanded=True) as status:
+            st.write("Gemini is creating a structured query plan.")
+            result = answer_data_question(
+                store,
+                dataset_id=str(selected.dataset_id),
+                version_id=str(selected.version_id),
+                question=question,
+                settings=settings,
+            )
+            st.write("The query passed the selected-version safety policy.")
+            status.update(label="Query complete", state="complete")
+        st.caption(result.explanation)
+        with st.expander("Validated SQL"):
+            st.code(result.sql, language="sql")
+        if result.rows:
+            st.dataframe(result.rows, use_container_width=True, hide_index=True)
+        else:
+            st.info("The query completed successfully but returned no rows.")
+        if result.chart:
+            st.subheader(result.chart.title)
+            chart_data = {
+                item[result.chart.x_column]: item[result.chart.y_column] for item in result.rows
+            }
+            if result.chart.chart_type == "line":
+                st.line_chart(chart_data)
+            elif result.chart.chart_type == "scatter":
+                st.scatter_chart(chart_data)
+            else:
+                st.bar_chart(chart_data)
+    except QueryError as error:
+        st.error(str(error))
+    except Exception:
+        st.error("The question could not be completed safely. No query was run.")
 
 
 def render_data_generation(st: Any, *, settings: Any) -> None:
@@ -345,9 +452,8 @@ def _render_table_edit(
     pending = st.session_state.get(proposal_key)
     if not pending:
         return
-    if (
-        pending["dataset_id"] != str(version.dataset_id)
-        or pending["version_id"] != str(version.version_id)
+    if pending["dataset_id"] != str(version.dataset_id) or pending["version_id"] != str(
+        version.version_id
     ):
         st.session_state.pop(proposal_key, None)
         return

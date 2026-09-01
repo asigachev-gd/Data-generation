@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 from app.config import get_settings
 from app.health import get_health_status
-from app.ui import render_data_generation
+from app.ui import render_data_generation, render_talk_to_data
 
 st.set_page_config(page_title="Data Generation", page_icon="🧪", layout="wide")
 
@@ -26,4 +26,7 @@ if view == "Data Generation":
     except ValidationError:
         st.error("Generation is unavailable until application configuration is valid.")
 else:
-    st.info("Natural-language querying will be available in Step 7.")
+    try:
+        render_talk_to_data(st, settings=get_settings())
+    except ValidationError:
+        st.error("Querying is unavailable until application configuration is valid.")

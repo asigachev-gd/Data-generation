@@ -7,12 +7,14 @@ import io
 import json
 import zipfile
 
+import psycopg
 import pytest
 
 from app.ddl import parse_schema
 from app.edits import apply_edit, parse_edit_plan
 from app.generation import generate_dataset, local_generation_profile
 from app.persistence import DatasetStore, PersistenceError
+from app.query import ChartSpec, QueryError, QueryPlan, execute_validated_query, validate_query_plan
 
 
 @pytest.fixture
@@ -126,3 +128,37 @@ def test_scoped_edit_creates_active_child_version_with_lineage(postgres_dsn: str
     assert [row["parent_id"] for row in store.table_rows(child.dataset_id, "child")] == [
         row["parent_id"] for row in generated.rows["child"]
     ]
+
+
+@pytest.mark.integration
+def test_query_role_is_read_only_and_query_is_version_scoped(postgres_dsn: str) -> None:
+    schema = parse_schema("CREATE TABLE records (id integer PRIMARY KEY, label text NOT NULL);")
+    generated = generate_dataset(
+        schema, row_counts={"records": 2}, seed=3, profile=local_generation_profile(schema)
+    )
+    store = DatasetStore(postgres_dsn)
+    stored = store.persist_dataset(schema, generated)
+    query = validate_query_plan(
+        QueryPlan(
+            sql="SELECT id, label FROM records ORDER BY id",
+            explanation="List records.",
+            chart=ChartSpec(chart_type="bar", x_column="label", y_column="id"),
+        ),
+        allowed_tables={"records"},
+        storage_schema=stored.storage_schema,
+    )
+    result = execute_validated_query(
+        postgres_dsn, storage_schema=stored.storage_schema, query=query
+    )
+    assert len(result.rows) == 2
+    assert result.chart is not None
+    with pytest.raises(QueryError, match="Schema-qualified"):
+        validate_query_plan(
+            QueryPlan(sql="SELECT * FROM data_generation.datasets", explanation="Escape."),
+            allowed_tables={"records"},
+            storage_schema=stored.storage_schema,
+        )
+    with psycopg.connect(postgres_dsn) as connection, connection.cursor() as cursor:
+        cursor.execute("SET LOCAL ROLE data_generation_query")
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            cursor.execute(f"UPDATE \"{stored.storage_schema}\".records SET label = 'changed'")

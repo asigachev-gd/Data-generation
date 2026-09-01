@@ -66,6 +66,12 @@ By the end of the practice, you need to develop a user-friendly UI and present b
 - Edits are deliberately limited to non-primary-key, non-unique, non-foreign-key columns. Supported safe changes regenerate matching values, add a bounded `text_prefix` for text generators, or set a nullable column's `null_probability`; unsupported relational changes are rejected rather than partially applied.
 - A confirmed edit reloads the persisted version, revalidates every row and database constraint, and writes a new immutable active version. The prior version is retained, and edit metadata records parent-version lineage, the original request, validated plan, model metadata, and redacted telemetry fields.
 
+## Implemented Talk to your data (Step 7)
+
+- Users select a persisted generated dataset/version, ask a natural-language question, and receive a Gemini structured query plan only after local validation. The UI discloses the validated SQL, result table, explanation, and an optional allowlisted result-derived chart.
+- The query policy permits one `SELECT` or `WITH ... SELECT` over only the selected version's unqualified tables. It rejects multiple statements, DDL/DML (including data-changing CTEs), schema-qualified names, unsafe functions, locks, `SELECT INTO`, and unresolved parameters.
+- Every accepted query runs through the dedicated `data_generation_query` read-only role with a selected-version search path, read-only transaction, three-second statement timeout, 500-row cap, and one-megabyte response limit. If the role cannot be established, querying fails closed.
+
 ## Functional Requirements
 
 ### Phase 1: Synthetic Data Generation

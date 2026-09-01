@@ -23,6 +23,7 @@ from app.generation import GeneratedDataset, validate_dataset
 from app.schema import Column, ForeignKey, Schema, Table
 
 METADATA_SCHEMA = "data_generation"
+QUERY_ROLE = "data_generation_query"
 _SAFE_CHECK = re.compile(
     r'^\s*"?([A-Za-z_][\w$]*)"?\s*(<=|>=|<>|!=|=|<|>)\s*(-?\d+(?:\.\d+)?)\s*$'
     r'|^\s*"?([A-Za-z_][\w$]*)"?\s+BETWEEN\s+(-?\d+)\s+AND\s+(-?\d+)\s*$',
@@ -57,6 +58,14 @@ class DatasetVersion:
     parent_version_id: uuid.UUID | None
 
 
+@dataclass(frozen=True)
+class QueryableVersion:
+    dataset_id: uuid.UUID
+    version_id: uuid.UUID
+    version_number: int
+    active: bool
+
+
 class DatasetStore:
     """Persist immutable validated datasets using a caller-owned PostgreSQL DSN."""
 
@@ -84,6 +93,27 @@ class DatasetStore:
                     """
                 ).format(sql.Identifier(METADATA_SCHEMA))
             )
+            # The application login can assume this NOLOGIN role only for a query transaction.
+            # A deployment account without CREATEROLE can still generate data, but querying fails
+            # closed rather than silently running with its broader privileges.
+            try:
+                cursor.execute(
+                    sql.SQL(
+                        "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = {}) "
+                        "THEN CREATE ROLE {} NOLOGIN NOINHERIT; END IF; END $$"
+                    ).format(sql.Literal(QUERY_ROLE), sql.Identifier(QUERY_ROLE))
+                )
+                cursor.execute(
+                    sql.SQL("GRANT {} TO CURRENT_USER").format(sql.Identifier(QUERY_ROLE))
+                )
+            except psycopg.Error as error:
+                connection.rollback()
+                # Metadata setup below must not continue in an aborted transaction. Reopen it on
+                # the next initialize call; deployments lacking role administration fail closed
+                # in the safe query layer.
+                raise PersistenceError(
+                    "Database user cannot configure the required read-only query role."
+                ) from error
             cursor.execute(
                 sql.SQL(
                     """
@@ -222,6 +252,16 @@ class DatasetStore:
                         (version_id, table.name, table.name, len(dataset.rows[table.name])),
                     )
                 cursor.execute(
+                    sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(
+                        sql.Identifier(storage_schema), sql.Identifier(QUERY_ROLE)
+                    )
+                )
+                cursor.execute(
+                    sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {}").format(
+                        sql.Identifier(storage_schema), sql.Identifier(QUERY_ROLE)
+                    )
+                )
+                cursor.execute(
                     sql.SQL(
                         "UPDATE {}.dataset_versions SET status = 'active' WHERE id = %s"
                     ).format(sql.Identifier(METADATA_SCHEMA)),
@@ -236,11 +276,11 @@ class DatasetStore:
                 cursor.execute(
                     sql.SQL("""INSERT INTO {}.generation_requests
                         (id, version_id, request_kind, request_metadata, validation_report)
-                    VALUES (%s, %s, %s, %s, %s)""").format(
-                        sql.Identifier(METADATA_SCHEMA)
-                    ),
+                    VALUES (%s, %s, %s, %s, %s)""").format(sql.Identifier(METADATA_SCHEMA)),
                     (
-                        uuid.uuid4(), version_id, request_kind,
+                        uuid.uuid4(),
+                        version_id,
+                        request_kind,
                         Jsonb(
                             request_metadata
                             if request_metadata is not None
@@ -319,6 +359,29 @@ class DatasetStore:
         """Rebuild the trusted canonical model retained with the selected dataset."""
 
         return parse_schema(self.get_version(dataset_id, version_id).original_ddl)
+
+    def queryable_versions(self) -> list[QueryableVersion]:
+        """List active or historical versions users may explicitly select for querying."""
+
+        with (
+            psycopg.connect(self.dsn, row_factory=dict_row) as connection,
+            connection.cursor() as cursor,
+        ):
+            cursor.execute(
+                sql.SQL(
+                    """SELECT v.dataset_id, v.id AS version_id, v.version_number,
+                    d.active_version_id = v.id AS active
+                    FROM {}.dataset_versions v JOIN {}.datasets d ON d.id = v.dataset_id
+                    WHERE v.status = 'active'
+                    ORDER BY d.created_at DESC, v.version_number DESC"""
+                ).format(sql.Identifier(METADATA_SCHEMA), sql.Identifier(METADATA_SCHEMA))
+            )
+            return [
+                QueryableVersion(
+                    row["dataset_id"], row["version_id"], row["version_number"], row["active"]
+                )
+                for row in cursor.fetchall()
+            ]
 
     def table_rows(
         self,
